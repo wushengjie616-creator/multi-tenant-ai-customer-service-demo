@@ -284,10 +284,10 @@ docker compose run --rm demo-bootstrap
 
 面试规模压测汇总记录在 **[`report/压测报告.md`](report/压测报告.md)**；本轮多 worker 调参、无效轮次、成本保护和 outbox 根因定位的完整过程见 **[`report/压测调试全过程.md`](report/压测调试全过程.md)**：
 
-- 环境：macOS arm64 + Colima，Docker Compose 本地完整环境。
-- 结果：20.08 msg/s 稳定接入、100.27 msg/s 突发、100.27 QPS 财务查询和 20% LLM 超时降级均为 **0 失败**。
-- 财务查询 P95 140 ms，满足题目 P95 < 500 ms 目标；NATS 突发后无积压。
-- 报告如实记录 LLM 超时下的队头阻塞与未执行的生产级规模，**不代表生产容量承诺**。
+- 环境：macOS arm64 + Docker Desktop，2 vCPU / 约 3.81 GiB，隔离 Compose 卷。
+- 200 msg/s 正式轮：197.76 msg/s×5min、59,129 条、P95 200ms、0 失败，停压时 Outbox 与 NATS 已追平，**端到端通过**。
+- 1000 msg/s 正式轮：三 API 分流达到 411.22 msg/s、P95 2.4s、0 失败，仍未达到目标；扩容方案有效但不能宣称通过。
+- 500 WebSocket、100.08 QPS 财务和 20% LLM 超时降级通过；全部容量测试使用本地 Mock，真实 DeepSeek 新增费用为 0。
 
 复现命令：
 
@@ -323,6 +323,6 @@ report/          面试提交版报告（含压测报告）
 
 正式交付结论与证据索引见 **[`report/正式验收报告.md`](report/正式验收报告.md)**；第 6/7/8 项的设计与实现验证分别见 **[`docs/optimization/06-08-delivery-optimization-plan.md`](docs/optimization/06-08-delivery-optimization-plan.md)** 和 **[`report/06-08实现与回归验证报告.md`](report/06-08实现与回归验证报告.md)**。
 
-- 已在本地 2C4G 环境执行 500 WS、200 msg/s 稳定流、1000 msg/s 突发、100 QPS 财务和 20% LLM 超时场景；当前版本另完成 2/4 worker 阶梯复测。2 worker 达到 234.69 msg/s 零错误接入，但 PostgreSQL outbox 未同步排空，故端到端仍为 PARTIAL；1000 msg/s 当前版本复测在发现污染基线后主动停止。详见压测汇总、调试全过程与正式验收报告。
+- 已在本地 2C4G 环境完成 500 WS、200 msg/s 稳定流、1000 msg/s 突发、100 QPS 财务和 20% LLM 超时场景。Outbox 批量化后，精确 200 msg/s 轮达到 197.76 msg/s×5min、P95 200ms、零错误且停压即排空；1000 msg/s 经三 API 分流达到 411.22 msg/s、零错误，仍未达标。详见压测汇总、调试全过程与正式验收报告。
 - Redis 中断、NATS 中断和 worker 积压恢复已有 `make faulttest` 可重复证据；详见 [`report/故障注入报告.md`](report/故障注入报告.md)。
 - 确定性 embedding 负责低成本候选召回，语义弹性依赖 DeepSeek 改写与有上限的语义重排，适合演示与小型租户库，不代表大规模专用 embedding 模型的容量表现。

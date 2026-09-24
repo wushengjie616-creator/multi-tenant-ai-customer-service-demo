@@ -5,9 +5,10 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.nats import publish_bytes
 from app.models import OutboxEvent
@@ -15,7 +16,8 @@ from app.models import OutboxEvent
 log = get_logger(__name__)
 
 CLAIM_STALE_SECONDS = 60
-BATCH_SIZE = 20
+BATCH_SIZE = settings.outbox_batch_size
+PUBLISH_CONCURRENCY = settings.outbox_publish_concurrency
 MAX_ATTEMPTS = 5
 RETRY_DELAYS = (30, 120, 600, 1800)
 
@@ -26,27 +28,38 @@ async def relay_once(
     *,
     now: datetime | None = None,
     retry_delays: tuple[int, ...] = RETRY_DELAYS,
+    batch_size: int = BATCH_SIZE,
+    publish_concurrency: int = PUBLISH_CONCURRENCY,
 ) -> int:
     """声明并发布一批 pending 事件，返回成功发布条数。"""
     current = now or datetime.now(timezone.utc)
-    claimed = await _claim(session_factory, current)
-    published = 0
-    for pk, event_id, subject, payload in claimed:
+    claimed = await _claim(session_factory, current, batch_size=batch_size)
+    semaphore = asyncio.Semaphore(max(1, publish_concurrency))
+
+    async def publish_one(
+        pk: uuid.UUID, event_id: str, subject: str, payload: dict
+    ) -> tuple[uuid.UUID, str | None]:
         try:
-            data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            await publish_bytes(js, subject, data, message_id=event_id)
-            await _mark_published(session_factory, pk, current)
-            published += 1
+            async with semaphore:
+                data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                await publish_bytes(js, subject, data, message_id=event_id)
+            return pk, None
         except Exception as exc:  # noqa: BLE001
-            await _mark_failed(
-                session_factory, pk, str(exc), current, retry_delays=retry_delays
-            )
             log.warning("outbox publish failed event_id=%s err=%s", pk, exc)
-    return published
+            return pk, str(exc)
+
+    results = await asyncio.gather(*(publish_one(*event) for event in claimed))
+    await _mark_results(
+        session_factory, results, current, retry_delays=retry_delays
+    )
+    return sum(error is None for _, error in results)
 
 
 async def _claim(
-    session_factory: async_sessionmaker, now: datetime
+    session_factory: async_sessionmaker,
+    now: datetime,
+    *,
+    batch_size: int = BATCH_SIZE,
 ) -> list[tuple[uuid.UUID, str, str, dict]]:
     """用 `FOR UPDATE SKIP LOCKED` 抢占 pending 事件，并回吸卡死的 publishing。"""
     stale = now - timedelta(seconds=CLAIM_STALE_SECONDS)
@@ -66,7 +79,7 @@ async def _claim(
                 )
             )
             .order_by(OutboxEvent.created_at)
-            .limit(BATCH_SIZE)
+            .limit(max(1, batch_size))
             .with_for_update(skip_locked=True)
         )
         rows = list(result.scalars().all())
@@ -78,29 +91,40 @@ async def _claim(
         return [(r.id, r.event_id, r.subject, r.payload) for r in rows]
 
 
-async def _mark_published(
-    session_factory: async_sessionmaker, pk: uuid.UUID, now: datetime
-) -> None:
-    async with session_factory() as session:
-        row = await session.get(OutboxEvent, pk)
-        if row is not None:
-            row.status = "published"
-            row.published_at = now
-            row.claimed_at = None
-            await session.commit()
-
-
-async def _mark_failed(
+async def _mark_results(
     session_factory: async_sessionmaker,
-    pk: uuid.UUID,
-    error: str,
+    results: list[tuple[uuid.UUID, str | None]],
     now: datetime,
     *,
     retry_delays: tuple[int, ...] = RETRY_DELAYS,
 ) -> None:
+    """在一个事务中批量确认成功项，并记录各失败项的退避状态。"""
+    successful = [pk for pk, error in results if error is None]
+    failures = {pk: error for pk, error in results if error is not None}
     async with session_factory() as session:
-        row = await session.get(OutboxEvent, pk)
-        if row is not None:
+        if successful:
+            await session.execute(
+                update(OutboxEvent)
+                .where(
+                    OutboxEvent.id.in_(successful),
+                    OutboxEvent.status == "publishing",
+                )
+                .values(status="published", published_at=now, claimed_at=None)
+            )
+        if failures:
+            rows = list(
+                (
+                    await session.scalars(
+                        select(OutboxEvent).where(
+                            OutboxEvent.id.in_(failures),
+                            OutboxEvent.status == "publishing",
+                        )
+                    )
+                ).all()
+            )
+        else:
+            rows = []
+        for row in rows:
             if row.attempts >= MAX_ATTEMPTS:
                 row.status = "failed"
             else:
@@ -108,11 +132,16 @@ async def _mark_failed(
                 delay_index = min(max(row.attempts - 1, 0), len(retry_delays) - 1)
                 row.next_attempt_at = now + timedelta(seconds=retry_delays[delay_index])
             row.claimed_at = None
-            row.last_error = error[:2000]
-            await session.commit()
+            row.last_error = (failures[row.id] or "unknown publish failure")[:2000]
+        await session.commit()
 
 
-async def relay_loop(js, session_factory: async_sessionmaker, *, poll_interval: float = 0.1) -> None:
+async def relay_loop(
+    js,
+    session_factory: async_sessionmaker,
+    *,
+    poll_interval: float = settings.outbox_poll_interval_seconds,
+) -> None:
     """后台循环发布 pending outbox 事件。"""
     while True:
         try:

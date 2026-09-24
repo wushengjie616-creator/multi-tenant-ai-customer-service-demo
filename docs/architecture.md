@@ -53,6 +53,7 @@ assistant_service -> LLM（历史正序 + 当前 user message）
 - 入站 subject `im.inbound`，出站 `im.outbound`，提醒 `reminder.due`，重试 `tool.retry`，死信 `deadletter.*`。入站 Worker 使用 pull batch 和有界并发，同一 tenant/conversation 在同一批内串行。
 - 使用 JetStream stream + durable consumer + 显式 ACK/NAK + 最大投递次数（max deliver）+ 指数退避重试。
 - 至少一次投递；outbox 发布时用 `event_id` 作为 JetStream `Nats-Msg-Id` 压缩崩溃窗口的重复事件，消费端再以业务幂等键（如 `tenant_id + message_id`、`reminder occurrence id`）保证恰好一次业务效果。
+- Outbox relay 用 `FOR UPDATE SKIP LOCKED` 批量领取，按 `OUTBOX_PUBLISH_CONCURRENCY` 有界并发发布，并在单事务内批量确认成功项；部分失败仍逐项记录错误与退避。默认 batch=100、并发=20、poll=20ms。
 - `im.outbound` 同时被 NATS Core 非 queue-group subscription 广播到每个 API 副本，仅持有目标本地连接的副本推送；断线恢复仍以 PostgreSQL 为事实源。
 - 仅重试可恢复错误，指数退避 + 抖动，超过最大投递次数后进入死信 subject 并计数指标。禁止无限重试。
 
@@ -84,7 +85,7 @@ assistant_service -> LLM（历史正序 + 当前 user message）
 - 时区：原始时区默认 `Asia/Shanghai`，数据库统一存 UTC；重复规则先在租户 IANA 时区的本地墙钟上推进，再转回 UTC，避免 DST 漂移和 UTC 跨日误判。
 - 调度器扫描 `next_run_at <= now` 的到期提醒，以行锁/租约抢占，支持多实例。
 - 每条提醒的每次 occurrence 单独幂等（`reminder_deliveries` 表），避免重启或并发重复推送。
-- 当前 API 接受明确的本地 ISO 时间 + IANA 时区；自然语言时间若不唯一则要求用户澄清，不做猜测。
+- 当前 API 接受明确的本地 ISO 时间 + IANA 时区；自然语言可解析为“待确认候选”，只有用户点击确认后才创建提醒，歧义时间要求澄清，不直接产生副作用。
 
 ## 7. Mock 故障注入控制方式
 

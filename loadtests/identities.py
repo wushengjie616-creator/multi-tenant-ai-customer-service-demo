@@ -23,3 +23,12 @@ def identity_for(index: int) -> LoadIdentity:
         user_id=uuid.uuid5(NAMESPACE, f"user:{index}"),
         conversation_id=uuid.uuid5(NAMESPACE, f"conversation:{index}"),
     )
+
+
+def endpoint_for(index: int, endpoints: tuple[str, ...]) -> str | None:
+    """Assign a stable API endpoint to a virtual user for client-side fan-out."""
+    if index < 0:
+        raise ValueError("load-test endpoint index must be non-negative")
+    if not endpoints:
+        return None
+    return endpoints[index % len(endpoints)].rstrip("/")

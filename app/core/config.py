@@ -20,8 +20,10 @@ class Settings(BaseSettings):
     database_url_sync: str = (
         "postgresql+psycopg2://eduai:eduai_password@localhost:5432/eduai"
     )
-    database_pool_size: int = 20
-    database_max_overflow: int = 20
+    # Compose normally runs 3 API replicas + worker + scheduler.  Keep the
+    # aggregate below PostgreSQL's default max_connections=100.
+    database_pool_size: int = 8
+    database_max_overflow: int = 4
     database_pool_timeout_seconds: float = 10.0
     redis_url: str = "redis://localhost:6379/0"
     redis_max_connections: int = 50
@@ -30,6 +32,9 @@ class Settings(BaseSettings):
     nats_url: str = "nats://localhost:4222"
     worker_concurrency: int = 32
     worker_fetch_batch: int = 128
+    outbox_batch_size: int = 100
+    outbox_publish_concurrency: int = 20
+    outbox_poll_interval_seconds: float = 0.02
     metrics_collection_seconds: float = 5.0
     worker_metrics_port: int = 9101
     qdrant_url: str = "http://localhost:6333"

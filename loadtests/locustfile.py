@@ -11,12 +11,17 @@ from locust import HttpUser, between, constant_throughput, task
 from websockets.sync.client import connect
 
 from loadtests.config import LoadScenario, load_scenario
-from loadtests.identities import identity_for
+from loadtests.identities import endpoint_for, identity_for
 
 SCENARIO = load_scenario()
 RATE_PER_USER = float(os.getenv("LOADTEST_RATE_PER_USER", "4"))
 MESSAGE_CONTENT = os.getenv("LOADTEST_MESSAGE_CONTENT", "请介绍课程政策")
 POOL_SIZE = int(os.getenv("LOADTEST_POOL_SIZE", "500"))
+API_HOSTS = tuple(
+    host.strip()
+    for host in os.getenv("LOADTEST_API_HOSTS", "").split(",")
+    if host.strip()
+)
 _identity_counter = itertools.count()
 _identity_lock = threading.Lock()
 
@@ -40,8 +45,12 @@ class AuthenticatedUser(HttpUser):
         self.tenant_id = str(identity.tenant_id)
         self.user_id = str(identity.user_id)
         self.conversation_id = str(identity.conversation_id)
+        self.api_host = endpoint_for(index, API_HOSTS)
         self.token = load_token(self.tenant_id, self.user_id)
         self.client.headers.update({"Authorization": f"Bearer {self.token}"})
+
+    def api_url(self, path: str) -> str:
+        return f"{self.api_host}{path}" if self.api_host else path
 
 
 class WebhookUser(AuthenticatedUser):
@@ -58,7 +67,7 @@ class WebhookUser(AuthenticatedUser):
             "content": MESSAGE_CONTENT,
         }
         with self.client.post(
-            "/webhooks/im/messages",
+            self.api_url("/webhooks/im/messages"),
             json=payload,
             name="POST /webhooks/im/messages",
             catch_response=True,
@@ -82,7 +91,9 @@ class FinanceUser(AuthenticatedUser):
     @task
     def finance(self):
         with self.client.get(
-            "/finance/invoice", name="GET /finance/invoice", catch_response=True
+            self.api_url("/finance/invoice"),
+            name="GET /finance/invoice",
+            catch_response=True,
         ) as response:
             if response.status_code != 200:
                 response.failure(f"unexpected status: {response.status_code}")
@@ -106,7 +117,9 @@ class WebSocketUser(AuthenticatedUser):
         self._connect()
 
     def _connect(self):
-        ws_host = self.host.replace("https://", "wss://").replace("http://", "ws://")
+        ws_host = (self.api_host or self.host).replace("https://", "wss://").replace(
+            "http://", "ws://"
+        )
         started = time.perf_counter()
         try:
             self.ws = connect(
@@ -222,7 +235,9 @@ class WebSocketCapacityUser(AuthenticatedUser):
         self._connect()
 
     def _connect(self):
-        ws_host = self.host.replace("https://", "wss://").replace("http://", "ws://")
+        ws_host = (self.api_host or self.host).replace("https://", "wss://").replace(
+            "http://", "ws://"
+        )
         started = time.perf_counter()
         try:
             self.ws = connect(
@@ -269,7 +284,7 @@ class MixedCustomerUser(WebSocketUser):
             "content": "请介绍课程政策",
         }
         with self.client.post(
-            "/webhooks/im/messages",
+            self.api_url("/webhooks/im/messages"),
             json=payload,
             name="POST /webhooks/im/messages",
             catch_response=True,
@@ -279,12 +294,14 @@ class MixedCustomerUser(WebSocketUser):
 
     @task(2)
     def finance(self):
-        self.client.get("/finance/invoice", name="GET /finance/invoice")
+        self.client.get(
+            self.api_url("/finance/invoice"), name="GET /finance/invoice"
+        )
 
     @task(1)
     def knowledge(self):
         self.client.post(
-            "/knowledge/query",
+            self.api_url("/knowledge/query"),
             json={"question": "如何申请退费？"},
             name="POST /knowledge/query",
         )

@@ -1,5 +1,6 @@
 """P2 消息处理租约与 Outbox 有界重试行为。"""
 
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -88,6 +89,53 @@ async def test_outbox_reaches_failed_terminal_state_after_max_attempts(
     assert row.status == "failed"
     assert row.attempts == outbox_relay.MAX_ATTEMPTS
     assert "nats unavailable" in row.last_error
+
+
+async def test_outbox_relay_publishes_large_batch_concurrently(monkeypatch, make_user):
+    """持续流不能被 20 条串行发布限制；一轮应并发完成超过 20 条事件。"""
+    user = await make_user()
+    event_ids = [f"outbox-batch-{number}" for number in range(25)]
+    async with async_session() as session:
+        session.add_all(
+            [
+                OutboxEvent(
+                    event_id=event_id,
+                    trace_id=f"trace-{event_id}",
+                    tenant_id=user["tenant_id"],
+                    subject="im.inbound",
+                    payload={"type": "im.inbound", "number": number},
+                )
+                for number, event_id in enumerate(event_ids)
+            ]
+        )
+        await session.commit()
+
+    active = 0
+    max_active = 0
+
+    async def slow_publish(*args, **kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+
+    monkeypatch.setattr(outbox_relay, "publish_bytes", slow_publish)
+    published = await outbox_relay.relay_once(
+        object(), async_session, now=datetime(2030, 1, 1, tzinfo=timezone.utc)
+    )
+
+    async with async_session() as session:
+        rows = list(
+            (
+                await session.scalars(
+                    select(OutboxEvent).where(OutboxEvent.event_id.in_(event_ids))
+                )
+            ).all()
+        )
+    assert published == 25
+    assert max_active > 1
+    assert {row.status for row in rows} == {"published"}
 
 
 async def test_message_cursor_returns_only_later_messages(make_user, make_conversation):

@@ -10,6 +10,37 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from prometheus_client.parser import text_string_to_metric_families
+
+CAPACITY_METRICS = {
+    "eduai_outbox_events",
+    "eduai_queue_pending",
+    "eduai_queue_ack_pending",
+    "eduai_dead_letters_open",
+}
+
+
+def parse_prometheus_metrics(payload: str) -> list[dict]:
+    """Extract only capacity/backlog samples from a Prometheus exposition."""
+    samples = []
+    for family in text_string_to_metric_families(payload):
+        for sample in family.samples:
+            if sample.name not in CAPACITY_METRICS:
+                continue
+            samples.append(
+                {
+                    "metric": sample.name,
+                    "labels": dict(sample.labels),
+                    "value": float(sample.value),
+                }
+            )
+    return samples
+
+
+def application_metrics(url: str) -> list[dict]:
+    with urllib.request.urlopen(url, timeout=2) as response:  # noqa: S310 - local monitor
+        return parse_prometheus_metrics(response.read().decode("utf-8"))
+
 
 def docker_stats() -> list[dict]:
     result = subprocess.run(
@@ -48,6 +79,7 @@ def main() -> None:
     parser.add_argument(
         "--nats-url", default="http://localhost:8222/jsz?consumers=true"
     )
+    parser.add_argument("--metrics-url", default="http://localhost:8000/metrics")
     args = parser.parse_args()
 
     output = Path(args.output)
@@ -64,6 +96,10 @@ def main() -> None:
                 sample["nats_consumers"] = nats_consumers(args.nats_url)
             except Exception as exc:  # noqa: BLE001
                 sample["nats_error"] = str(exc)
+            try:
+                sample["application_metrics"] = application_metrics(args.metrics_url)
+            except Exception as exc:  # noqa: BLE001
+                sample["metrics_error"] = str(exc)
             handle.write(json.dumps(sample, ensure_ascii=False) + "\n")
             handle.flush()
             time.sleep(args.interval)
