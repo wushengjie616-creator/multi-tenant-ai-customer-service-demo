@@ -1,0 +1,10 @@
+{"query": "你们只教数学吗？", "expected_document_id": "faq", "expected_keywords": ["数学", "仅"]}
+{"query": "数学课程有什么层级？", "expected_document_id": "course-policy", "expected_keywords": ["同步", "思维", "奥数"]}
+{"query": "有奥数竞赛班吗？", "expected_document_id": "course-policy", "expected_keywords": ["奥数", "竞赛"]}
+{"query": "如何申请退费？", "expected_document_id": "refund-policy", "expected_keywords": ["退费", "7-15"]}
+{"query": "开课 30 天后还能退费吗？", "expected_document_id": "refund-policy", "expected_keywords": ["不予退费"]}
+{"query": "请假后可以补课吗？", "expected_document_id": "course-policy", "expected_keywords": ["补课", "3 次"]}
+{"query": "有数学思维挑战赛吗？", "expected_document_id": "activity-policy", "expected_keywords": ["挑战赛"]}
+{"query": "机构如何保护学员隐私？", "expected_document_id": "service-agreement", "expected_keywords": ["隐私"]}
+{"query": "英语口语课怎么报名？", "expected_document_id": null, "expected_keywords": [], "expect_fallback": true}
+{"query": "今天天气怎么样？", "expected_document_id": null, "expected_keywords": [], "expect_fallback": true}

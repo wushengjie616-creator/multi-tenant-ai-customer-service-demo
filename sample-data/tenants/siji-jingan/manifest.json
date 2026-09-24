@@ -1,0 +1,60 @@
+{
+  "tenant_key": "siji-jingan",
+  "tenant_name": "静安区四季",
+  "tenant_id": "20000000-0000-0000-0000-000000000001",
+  "description": "虚构的数学培训机构（非真实客户），仅提供数学课程，用于演示租户隔离与学科知识问答。",
+  "industry": "教育培训",
+  "subject": "数学",
+  "service": {
+    "hotline": "400-200-0002",
+    "email": "support@siji-jingan.example.com",
+    "business_hours": "工作日 09:00-21:00，周末 09:00-18:00"
+  },
+  "documents": [
+    {
+      "document_id": "course-policy",
+      "title": "数学课程政策",
+      "source": "siji://knowledge/course-policy",
+      "version": 1,
+      "language": "zh-CN",
+      "file": "knowledge/course-policy.md",
+      "tags": ["数学", "课程", "请假", "补课", "转班"]
+    },
+    {
+      "document_id": "refund-policy",
+      "title": "退费政策",
+      "source": "siji://knowledge/refund-policy",
+      "version": 1,
+      "language": "zh-CN",
+      "file": "knowledge/refund-policy.md",
+      "tags": ["退费", "退款"]
+    },
+    {
+      "document_id": "activity-policy",
+      "title": "活动政策",
+      "source": "siji://knowledge/activity-policy",
+      "version": 1,
+      "language": "zh-CN",
+      "file": "knowledge/activity-policy.md",
+      "tags": ["活动", "优惠", "挑战赛", "奥数"]
+    },
+    {
+      "document_id": "service-agreement",
+      "title": "服务协议",
+      "source": "siji://knowledge/service-agreement",
+      "version": 1,
+      "language": "zh-CN",
+      "file": "knowledge/service-agreement.md",
+      "tags": ["协议", "服务", "隐私"]
+    },
+    {
+      "document_id": "faq",
+      "title": "数学常见问题",
+      "source": "siji://knowledge/faq",
+      "version": 1,
+      "language": "zh-CN",
+      "file": "knowledge/faq.md",
+      "tags": ["常见问题", "FAQ", "数学"]
+    }
+  ]
+}

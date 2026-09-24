@@ -1,0 +1,5 @@
+{"query":"你们有哪些班？","expected_contains":["数学思维","科学探究","Python"]}
+{"query":"数学 A3 什么时候上课？","expected_contains":["周四","18:30","3F-305"]}
+{"query":"如何请假和补课？","expected_contains":["2 小时","3 次","补课"]}
+{"query":"退费多久到账？","expected_contains":["3 个工作日","5–10 个工作日"]}
+{"query":"有什么活动和优惠？","expected_contains":["科学开放日","300 元","200 元"]}

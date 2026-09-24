@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 环境与密钥（NFR3-08：只提交 .env.example）
+.env
+.env.local
+*.env.local
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+
+# 数据 / 日志
+pgdata/
+*.db
+*.sqlite3
+*.log
+
+# docs/ 与 sample-data/ 均为面试交付物：前者提供设计/验收证据，后者提供
+# 可重复的一键演示数据。目录内只能放脱敏或纯虚构内容，不得放真实客户资料。

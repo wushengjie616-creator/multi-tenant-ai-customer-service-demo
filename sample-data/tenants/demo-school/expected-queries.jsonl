@@ -1,0 +1,10 @@
+{"query": "如何申请退费？", "expected_document_id": "refund-policy", "expected_keywords": ["退费", "退款", "7-15"]}
+{"query": "开课 30 天后还能退费吗？", "expected_document_id": "refund-policy", "expected_keywords": ["不予退费", "人工审核"]}
+{"query": "请假后可以补课吗？", "expected_document_id": "course-policy", "expected_keywords": ["补课", "3 次", "30 天"]}
+{"query": "一节课多长时间？", "expected_document_id": "faq", "expected_keywords": ["90 分钟"]}
+{"query": "上课是线上还是线下？", "expected_document_id": "faq", "expected_keywords": ["线上", "线下"]}
+{"query": "新学员有免费体验吗？", "expected_document_id": "activity-policy", "expected_keywords": ["试听", "体验"]}
+{"query": "老带新有什么优惠？", "expected_document_id": "activity-policy", "expected_keywords": ["老带新", "赠课"]}
+{"query": "机构如何保护学员隐私？", "expected_document_id": "service-agreement", "expected_keywords": ["隐私"]}
+{"query": "转班需要满足什么条件？", "expected_document_id": "course-policy", "expected_keywords": ["转班", "名额"]}
+{"query": "今天天气怎么样？", "expected_document_id": null, "expected_keywords": [], "expect_fallback": true}

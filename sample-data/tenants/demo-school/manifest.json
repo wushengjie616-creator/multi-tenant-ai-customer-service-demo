@@ -1,0 +1,59 @@
+{
+  "tenant_key": "demo-school",
+  "tenant_name": "示例教育机构",
+  "tenant_id": "00000000-0000-0000-0000-000000000001",
+  "description": "虚构的素质教育机构（非真实客户），用于本地演示知识问答、客服机器人与租户隔离场景。",
+  "industry": "教育培训",
+  "service": {
+    "hotline": "400-000-0000",
+    "email": "support@demo-school.example.com",
+    "business_hours": "工作日 09:00-21:00，周末 09:00-18:00"
+  },
+  "documents": [
+    {
+      "document_id": "course-policy",
+      "title": "课程政策",
+      "source": "demo://knowledge/course-policy",
+      "version": 1,
+      "language": "zh-CN",
+      "file": "knowledge/course-policy.md",
+      "tags": ["课程", "请假", "补课", "调课", "转班"]
+    },
+    {
+      "document_id": "refund-policy",
+      "title": "退费政策",
+      "source": "demo://knowledge/refund-policy",
+      "version": 1,
+      "language": "zh-CN",
+      "file": "knowledge/refund-policy.md",
+      "tags": ["退费", "退款", "课程"]
+    },
+    {
+      "document_id": "activity-policy",
+      "title": "活动政策",
+      "source": "demo://knowledge/activity-policy",
+      "version": 1,
+      "language": "zh-CN",
+      "file": "knowledge/activity-policy.md",
+      "tags": ["活动", "优惠", "促销", "赠课"]
+    },
+    {
+      "document_id": "service-agreement",
+      "title": "服务协议",
+      "source": "demo://knowledge/service-agreement",
+      "version": 1,
+      "language": "zh-CN",
+      "file": "knowledge/service-agreement.md",
+      "tags": ["协议", "服务", "条款", "隐私"]
+    },
+    {
+      "document_id": "faq",
+      "title": "常见问题",
+      "source": "demo://knowledge/faq",
+      "version": 1,
+      "language": "zh-CN",
+      "file": "knowledge/faq.md",
+      "tags": ["常见问题", "FAQ", "咨询"]
+    }
+  ]
+}

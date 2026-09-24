@@ -1,0 +1,12 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>人工客服工作台·教育 AI 平台</title><link rel="stylesheet" href="/ui/styles.css"></head>
+<body><main class="shell wide"><nav class="topbar"><a class="brand" href="/ui/"><span class="brand-mark">客</span><span id="agent-brand">人工客服工作台</span></a><a id="back-to-tenant" class="nav-link" href="/ui/tenant.html">返回租户平台</a></nav>
+  <section class="welcome-strip"><div><span class="eyebrow">HUMAN SUPPORT</span><h2 id="agent-title">人工客服工作台</h2><p>处理当前租户的人工会话，所有读取和回复均按 tenant_id 隔离。</p></div><div class="welcome-stat"><strong id="pending-count">0</strong><span>待处理</span></div><button id="refresh-handoffs" class="button secondary">刷新会话</button></section>
+  <div class="agent-layout">
+    <section class="panel section-panel"><div class="section-heading"><div><span class="eyebrow">QUEUE</span><h2>人工会话队列</h2></div></div><div id="handoff-list" class="data-list"><div class="empty compact">正在读取会话…</div></div><div id="handoff-list-status" class="status"></div></section>
+    <section class="panel section-panel"><div class="section-heading"><div><span class="eyebrow">CONVERSATION</span><h2 id="thread-title">请选择会话</h2><p id="thread-state" class="hint">选择左侧会话后才能回复。</p></div><div class="row"><button id="accept-handoff" class="button secondary" disabled>接入会话</button><button id="request-close" class="button danger" disabled>发起结束</button></div></div>
+      <div id="agent-messages" class="messages"><div class="empty">尚未选择人工会话。</div></div>
+      <div class="template-panel"><strong>常用话术模板</strong><div id="reply-templates" class="suggestion-list"></div><span class="hint">点击模板会填入输入框，确认内容后可一键发送。</span></div>
+      <form id="agent-reply-form" class="composer"><input id="agent-reply-input" placeholder="输入人工回复" required disabled><button class="button" type="submit" disabled>发送回复</button></form><div id="agent-status" class="status"></div>
+    </section>
+  </div>
+</main><script src="/ui/common.js?v=20260924-3"></script><script src="/ui/agent.js?v=20260924-3"></script></body></html>

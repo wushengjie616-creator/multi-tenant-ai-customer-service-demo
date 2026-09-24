@@ -1,0 +1,18 @@
+{
+  "tenant_key": "xinghe-future",
+  "tenant_name": "星河未来成长中心",
+  "tenant_id": "20000000-0000-0000-0000-000000000001",
+  "description": "功能完整的虚拟教育机构，仅用于本地演示。",
+  "industry": "素质教育",
+  "service": {"hotline": "400-820-2026", "email": "service@xinghe-future.example.com", "business_hours": "每日 08:30-21:00"},
+  "documents": [
+    {"document_id":"institution-guide","title":"机构与校区指南","source":"xinghe://institution","version":1,"file":"knowledge/institution-guide.md"},
+    {"document_id":"course-catalog","title":"2026 秋季课程与班级","source":"xinghe://courses","version":1,"file":"knowledge/course-catalog.md"},
+    {"document_id":"attendance-policy","title":"请假、补课与转班政策","source":"xinghe://attendance","version":1,"file":"knowledge/attendance-policy.md"},
+    {"document_id":"fees-and-orders","title":"学费、订单与自动续费","source":"xinghe://fees","version":1,"file":"knowledge/fees-and-orders.md"},
+    {"document_id":"refund-policy","title":"退费政策","source":"xinghe://refund","version":1,"file":"knowledge/refund-policy.md"},
+    {"document_id":"activities","title":"活动、优惠与奖学金","source":"xinghe://activities","version":1,"file":"knowledge/activities.md"},
+    {"document_id":"service-agreement","title":"服务协议与隐私说明","source":"xinghe://agreement","version":1,"file":"knowledge/service-agreement.md"},
+    {"document_id":"faq","title":"学员常见问题","source":"xinghe://faq","version":1,"file":"knowledge/faq.md"}
+  ]
+}

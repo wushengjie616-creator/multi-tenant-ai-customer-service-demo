@@ -1,0 +1,13 @@
+# Automated-test override: E2E must never call the paid/provider LLM configured
+# in .env. This file is layered over docker-compose.yml only by `make test`.
+services:
+  api:
+    environment:
+      DEEPSEEK_API_URL: http://mock-llm:8101/v1/chat/completions
+      DEEPSEEK_API_KEY: test-key
+      DEEPSEEK_MODEL: mock-education
+  worker:
+    environment:
+      DEEPSEEK_API_URL: http://mock-llm:8101/v1/chat/completions
+      DEEPSEEK_API_KEY: test-key
+      DEEPSEEK_MODEL: mock-education

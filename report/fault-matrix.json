@@ -1,0 +1,150 @@
+{
+  "generated_at": "2026-09-23T22:53:34+0800",
+  "passed": true,
+  "checks": [
+    {
+      "name": "redis-stop-recover",
+      "passed": true,
+      "duration_seconds": 0.435,
+      "evidence": {
+        "degraded_ready": [
+          503,
+          {
+            "status": "degraded",
+            "checks": {
+              "postgres": "ok",
+              "redis": "error: Error -2 connecting to redis:6379. Name or service not known.",
+              "nats": "ok",
+              "qdrant": "ok"
+            }
+          }
+        ],
+        "live_status": 200,
+        "ack_status": 202,
+        "message_id": "fault-redis-9812007bd363426c85269e9d76e742bf",
+        "recovered_ready": [
+          200,
+          {
+            "status": "ok",
+            "checks": {
+              "postgres": "ok",
+              "redis": "ok",
+              "nats": "ok",
+              "qdrant": "ok"
+            }
+          }
+        ]
+      },
+      "error": null
+    },
+    {
+      "name": "nats-stop-recover",
+      "passed": true,
+      "duration_seconds": 2.395,
+      "evidence": {
+        "degraded_ready": [
+          503,
+          {
+            "status": "degraded",
+            "checks": {
+              "postgres": "ok",
+              "redis": "ok",
+              "nats": "error: timeout after 2s",
+              "qdrant": "ok"
+            }
+          }
+        ],
+        "ack_status": 202,
+        "message_id": "fault-nats-a3eb84432f484302b6b482d1b6199696",
+        "recovered_ready": [
+          200,
+          {
+            "status": "ok",
+            "checks": {
+              "postgres": "ok",
+              "redis": "ok",
+              "nats": "ok",
+              "qdrant": "ok"
+            }
+          }
+        ]
+      },
+      "error": null
+    },
+    {
+      "name": "queue-backlog-recover",
+      "passed": true,
+      "duration_seconds": 14.003,
+      "evidence": {
+        "accepted": 12,
+        "baseline": {
+          "pending": 0,
+          "ack_pending": 0,
+          "redelivered": 0,
+          "consumers": {
+            "im-inbound-worker": {
+              "pending": 0,
+              "ack_pending": 0,
+              "redelivered": 0
+            },
+            "im-outbound-api": {
+              "pending": 0,
+              "ack_pending": 0,
+              "redelivered": 0
+            },
+            "im-outbound-mockim": {
+              "pending": 0,
+              "ack_pending": 0,
+              "redelivered": 0
+            }
+          }
+        },
+        "accumulated": {
+          "pending": 12,
+          "ack_pending": 0,
+          "redelivered": 0,
+          "consumers": {
+            "im-inbound-worker": {
+              "pending": 12,
+              "ack_pending": 0,
+              "redelivered": 0
+            },
+            "im-outbound-api": {
+              "pending": 0,
+              "ack_pending": 0,
+              "redelivered": 0
+            },
+            "im-outbound-mockim": {
+              "pending": 0,
+              "ack_pending": 0,
+              "redelivered": 0
+            }
+          }
+        },
+        "recovered": {
+          "pending": 0,
+          "ack_pending": 0,
+          "redelivered": 0,
+          "consumers": {
+            "im-inbound-worker": {
+              "pending": 0,
+              "ack_pending": 0,
+              "redelivered": 0
+            },
+            "im-outbound-api": {
+              "pending": 0,
+              "ack_pending": 0,
+              "redelivered": 0
+            },
+            "im-outbound-mockim": {
+              "pending": 0,
+              "ack_pending": 0,
+              "redelivered": 0
+            }
+          }
+        }
+      },
+      "error": null
+    }
+  ]
+}

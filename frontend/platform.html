@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>平台管理员·多租户中心</title><link rel="stylesheet" href="/ui/styles.css"></head><body><main class="shell wide">
+<nav class="topbar"><a class="brand" href="/ui/"><span class="brand-mark">AI</span><span>平台管理员</span></a><a class="nav-link" href="/ui/">返回首页</a></nav>
+<section class="welcome-strip"><div><span class="eyebrow">PLATFORM ADMIN</span><h2>多租户运营中心</h2><p>5 个策展演示租户，数据、身份、会话和知识检索均按 tenant_id 强制隔离。</p></div><div class="welcome-stat"><strong id="tenant-count">0</strong><span>演示租户</span></div><button id="refresh-platform" class="button secondary">刷新</button></section>
+<section class="panel section-panel"><div class="section-heading"><div><span class="eyebrow">TENANTS</span><h2>验收演示租户</h2><p class="hint">编号 T01–T05 仅用于展示，底层仍使用 UUID 和 tenant_id 进行真实隔离。选择账号进入租户工作台，再切换到客户视角。</p></div></div><div id="platform-tenants" class="feature-grid three"><div class="empty">正在读取租户…</div></div><div id="platform-status" class="status"></div></section>
+</main><script src="/ui/common.js?v=20260924-2"></script><script src="/ui/platform.js?v=20260924-2"></script></body></html>

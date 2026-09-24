@@ -1,0 +1,225 @@
+# 教育平台高并发 AI 客服机器人 — 本地开发/演示编排
+# 用法: (可选) cp .env.example .env 覆盖默认值 ; make up
+#
+# 镜像复用: api / worker / scheduler / 5 个 mock 共用一个 Dockerfile 构建产物，
+# 仅通过 command 区分入口。基础设施 postgres / redis / nats / qdrant 独立容器。
+
+x-app-env: &app-env
+  APP_ENV: ${APP_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://eduai:eduai_password@postgres:5432/eduai}
+  DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql+psycopg2://eduai:eduai_password@postgres:5432/eduai}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  REDIS_MAX_CONNECTIONS: ${REDIS_MAX_CONNECTIONS:-50}
+  CONTEXT_MAX_MESSAGES: ${CONTEXT_MAX_MESSAGES:-20}
+  CONTEXT_TTL_SECONDS: ${CONTEXT_TTL_SECONDS:-3600}
+  NATS_URL: ${NATS_URL:-nats://nats:4222}
+  QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+  JWT_SECRET: ${JWT_SECRET:-dev_secret_change_me}
+  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+  TENANT_RATE_LIMIT_PER_MINUTE: ${TENANT_RATE_LIMIT_PER_MINUTE:-600}
+  USER_RATE_LIMIT_PER_MINUTE: ${USER_RATE_LIMIT_PER_MINUTE:-120}
+  MOCK_IM_URL: ${MOCK_IM_URL:-http://mock-im:8100}
+  MOCK_LLM_URL: ${MOCK_LLM_URL:-http://mock-llm:8101}
+  MOCK_KNOWLEDGE_URL: ${MOCK_KNOWLEDGE_URL:-http://mock-knowledge:8102}
+  MOCK_PLATFORM_URL: ${MOCK_PLATFORM_URL:-http://mock-platform:8103}
+  MOCK_FINANCE_URL: ${MOCK_FINANCE_URL:-http://mock-finance:8104}
+  DEEPSEEK_API_URL: ${DEEPSEEK_API_URL:-http://mock-llm:8101/v1/chat/completions}
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+  DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+  LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-30}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.2}
+  LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-800}
+  LLM_GLOBAL_MAX_INFLIGHT: ${LLM_GLOBAL_MAX_INFLIGHT:-600}
+  LLM_GLOBAL_STARTS_PER_SECOND: ${LLM_GLOBAL_STARTS_PER_SECOND:-20}
+  LLM_INPUT_COST_PER_MILLION_USD: ${LLM_INPUT_COST_PER_MILLION_USD:-0}
+  LLM_OUTPUT_COST_PER_MILLION_USD: ${LLM_OUTPUT_COST_PER_MILLION_USD:-0}
+  DEMO_MODE: ${DEMO_MODE:-true}
+  DEMO_TENANT_ID: ${DEMO_TENANT_ID:-10000000-0000-0000-0000-000000000001}
+  DEMO_TENANT_NAME: ${DEMO_TENANT_NAME:-演示租户1}
+  DEMO_ADMIN_USER_ID: ${DEMO_ADMIN_USER_ID:-10000000-0000-0000-0000-000000000100}
+  DEMO_ADMIN_CONVERSATION_ID: ${DEMO_ADMIN_CONVERSATION_ID:-10000000-0000-0000-0000-000000000200}
+  DEMO_TENANT_ADMIN_EMAIL: ${DEMO_TENANT_ADMIN_EMAIL:-admin@example.com}
+  DEMO_TENANT_ADMIN_PASSWORD: ${DEMO_TENANT_ADMIN_PASSWORD:-change_me}
+  DEMO_CUSTOMER_TENANT_ID: ${DEMO_CUSTOMER_TENANT_ID:-20000000-0000-0000-0000-000000000001}
+  DEMO_CUSTOMER_TENANT_NAME: ${DEMO_CUSTOMER_TENANT_NAME:-星河未来成长中心}
+  DEMO_CUSTOMER_USER_ID: ${DEMO_CUSTOMER_USER_ID:-20000000-0000-0000-0000-000000000101}
+  DEMO_CUSTOMER_CONVERSATION_ID: ${DEMO_CUSTOMER_CONVERSATION_ID:-20000000-0000-0000-0000-000000000201}
+  DEMO_CUSTOMER_EMAIL: ${DEMO_CUSTOMER_EMAIL:-lin-parent@xinghe-future.example.com}
+  DEMO_CUSTOMER_KNOWLEDGE_ROOT: ${DEMO_CUSTOMER_KNOWLEDGE_ROOT:-sample-data/tenants/xinghe-future}
+  DEMO_MAX_UPLOAD_CHARS: ${DEMO_MAX_UPLOAD_CHARS:-200000}
+  KNOWLEDGE_LEXICAL_SCAN_LIMIT: ${KNOWLEDGE_LEXICAL_SCAN_LIMIT:-500}
+  RAG_SEMANTIC_CANDIDATE_LIMIT: ${RAG_SEMANTIC_CANDIDATE_LIMIT:-40}
+
+x-external-dns: &external-dns
+  - ${DOCKER_DNS_PRIMARY:-223.5.5.5}
+  - ${DOCKER_DNS_SECONDARY:-1.1.1.1}
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-eduai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-eduai_password}
+      POSTGRES_DB: ${POSTGRES_DB:-eduai}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-eduai} -d ${POSTGRES_DB:-eduai}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    # Redis 仅保存可从 PostgreSQL 重建的热数据；显式关闭 RDB/AOF，重启后以 miss 触发回填。
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  nats:
+    image: nats:2-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "${NATS_PORT:-4222}:4222"
+      - "${NATS_MONITOR_PORT:-8222}:8222"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8222/healthz >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.2
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    healthcheck:
+      # qdrant 镜像不含 curl/wget，改用 bash /dev/tcp 探测 6333 端口（等价 pg_isready 式连通检查）
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "${OTEL_HTTP_PORT:-4318}:4318"
+
+  api:
+    build:
+      context: .
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+    image: education-ai-service-app:latest
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment: *app-env
+    dns: *external-dns
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      demo-bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  demo-bootstrap:
+    image: education-ai-service-app:latest
+    command: sh -c "alembic upgrade head && python -m scripts.bootstrap_demo"
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+    restart: "no"
+
+  worker:
+    image: education-ai-service-app:latest
+    command: python -m app.workers.message_worker
+    environment: *app-env
+    dns: *external-dns
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      demo-bootstrap: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  scheduler:
+    image: education-ai-service-app:latest
+    command: python -m app.workers.reminder_worker
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      demo-bootstrap: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  mock-im:
+    image: education-ai-service-app:latest
+    command: uvicorn mocks.mock_im.main:app --host 0.0.0.0 --port 8100
+    ports:
+      - "8100:8100"
+    depends_on:
+      nats: { condition: service_healthy }
+    restart: unless-stopped
+
+  mock-llm:
+    image: education-ai-service-app:latest
+    command: uvicorn mocks.mock_llm.main:app --host 0.0.0.0 --port 8101
+    ports:
+      - "8101:8101"
+    restart: unless-stopped
+
+  mock-knowledge:
+    image: education-ai-service-app:latest
+    command: uvicorn mocks.mock_knowledge.main:app --host 0.0.0.0 --port 8102
+    ports:
+      - "8102:8102"
+    restart: unless-stopped
+
+  mock-platform:
+    image: education-ai-service-app:latest
+    command: uvicorn mocks.mock_platform.main:app --host 0.0.0.0 --port 8103
+    ports:
+      - "8103:8103"
+    restart: unless-stopped
+
+  mock-finance:
+    image: education-ai-service-app:latest
+    command: uvicorn mocks.mock_finance.main:app --host 0.0.0.0 --port 8104
+    ports:
+      - "8104:8104"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  qdrant_storage:
