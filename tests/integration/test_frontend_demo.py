@@ -52,6 +52,12 @@ async def test_frontend_pages_are_served_by_fastapi(client):
     assert 'id="request-close"' in agent.text
     assert 'id="handoff-state"' in customer.text
     assert 'id="confirm-handoff-close"' in customer.text
+    assert 'id="handoff-close-prompt"' in customer.text
+    assert 'id="prompt-confirm-handoff-close"' in customer.text
+    assert 'role="alertdialog"' in customer.text
+    assert 'id="tenant-handoff-monitor"' in tenant.text
+    assert 'id="tenant-confirm-handoff-close"' in tenant.text
+    assert 'id="tenant-continue-handoff"' in tenant.text
     assert 'id="customer-list"' in tenant.text
     assert 'id="create-tenant-form"' not in tenant.text
     assert "登录已有租户" not in tenant.text

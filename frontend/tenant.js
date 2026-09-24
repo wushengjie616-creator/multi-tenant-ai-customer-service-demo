@@ -1,4 +1,5 @@
 let tenantSession = null;
+let tenantActiveHandoff = null;
 let selectedFiles = [];
 const $ = (id) => document.getElementById(id);
 const featureMeta = {
@@ -21,14 +22,16 @@ function renderEnabledFeatures(features) {
   $("knowledge-workspace").classList.toggle("single-column", !features.includes("knowledge") || !features.includes("assistant"));
   $("operations").hidden = !features.includes("operations");
   $("agent-workspace").hidden = !features.includes("handoff");
+  $("tenant-handoff-monitor").hidden = !(features.includes("assistant") && features.includes("handoff"));
 }
 
 async function enterWorkbench(data) {
-  tenantSession = { adminToken: data.access_token, token: data.customer_access_token, tenantId: data.tenant_id, userId: data.customer_user_id, conversationId: data.customer_conversation_id, adminConversationId: data.conversation_id, features: data.features, liveHandoff: data.features.includes("handoff") };
+  tenantSession = { adminToken: data.access_token, token: data.customer_access_token, tenantId: data.tenant_id, userId: data.customer_user_id, conversationId: data.customer_conversation_id, adminConversationId: data.conversation_id, features: data.features, liveHandoff: data.features.includes("handoff"), humanMode: false, onHandoff: loadTenantHandoff };
   sessionStorage.setItem("tenantCustomerSession", JSON.stringify({ token: data.customer_access_token, tenantId: data.tenant_id, tenantName: data.tenant_name, customerName: data.customer_name, userId: data.customer_user_id, conversationId: data.customer_conversation_id, features: data.features, dependencyMode: data.dependency_mode }));
   $("workspace-title").textContent = `${data.tenant_name}·工作台`; $("workspace-identity").textContent = `租户 ID：${data.tenant_id} · 依赖模式：${data.dependency_mode}`;
+  $("assistant-session-label").textContent = `模拟客户会话 · ${data.customer_name || "演示客户"} · ${data.dependency_mode === "configured" ? "真实 LLM / 租户 RAG" : "确定性 Mock"}`;
   renderEnabledFeatures(data.features);
-  await Promise.all([loadCustomers(), data.features.includes("knowledge") ? loadDocuments() : null, data.features.includes("assistant") ? Demo.loadMessages(tenantSession, $("messages")) : null, data.features.includes("operations") ? loadOperations() : null, loadUsage()]);
+  await Promise.all([loadCustomers(), data.features.includes("knowledge") ? loadDocuments() : null, data.features.includes("assistant") ? Demo.loadMessages(tenantSession, $("messages")) : null, data.features.includes("handoff") ? loadTenantHandoff() : null, data.features.includes("operations") ? loadOperations() : null, loadUsage()]);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -117,7 +120,7 @@ const tenantActionRules = [
   { re: /订单|账单|发票|退款|退费|余额/, feature: "finance", label: "查询财务信息", run: () => Demo.api("/finance/order", { token: tenantSession.token }) },
   { re: /续费|扣款|请假|缺席|补课|调课/, feature: "services", label: "打开办事功能", run: async () => ({ message: "已识别为办事服务意图；正式客户页面可执行续费、请假、补课或调课操作。" }) },
   { re: /提醒|通知/, feature: "reminders", label: "查看提醒功能", run: async () => ({ message: "提醒演示已启用；真实定时投递不在本次演示范围内。" }) },
-  { re: /人工|客服|老师回复/, feature: "handoff", label: "转人工客服", run: async () => { const result = await Demo.api("/handoffs", { method: "POST", token: tenantSession.token, body: JSON.stringify({ conversation_id: tenantSession.conversationId, summary: "客户请求人工协助", reason: "explicit_request", attempted_actions: ["rag_assistant"] }) }); tenantSession.humanMode = true; return { message: `已转人工，工单 ${result.id.slice(0, 8)}。` }; } },
+  { re: /人工|客服|老师回复/, feature: "handoff", label: "转人工客服", run: async () => { const result = await Demo.api("/handoffs", { method: "POST", token: tenantSession.token, body: JSON.stringify({ conversation_id: tenantSession.conversationId, summary: "客户请求人工协助", reason: "explicit_request", attempted_actions: ["rag_assistant"] }) }); tenantSession.humanMode = true; await loadTenantHandoff(); return { message: `已转人工，工单 ${result.id.slice(0, 8)}。` }; } },
 ];
 function renderTenantActions(text) {
   tenantActionDock.replaceChildren();
@@ -130,7 +133,37 @@ function renderTenantActions(text) {
 }
 $("chat-input").addEventListener("input", (event) => renderTenantActions(event.target.value));
 
+const tenantHandoffLabels = { pending: "待处理", in_progress: "处理中", awaiting_confirmation: "待确认结束", ended: "已结束" };
+async function loadTenantHandoff() {
+  if (!tenantSession?.features.includes("handoff")) return;
+  try {
+    const data = await Demo.api(`/handoffs/active?conversation_id=${tenantSession.conversationId}`, { token: tenantSession.token });
+    tenantActiveHandoff = data.handoff;
+    const state = $("tenant-handoff-state"); const actions = $("tenant-handoff-close-actions"); const description = $("tenant-handoff-description");
+    if (!tenantActiveHandoff) {
+      tenantSession.humanMode = false; state.textContent = "未转人工或已结束"; state.className = "state-badge off"; actions.hidden = true; description.textContent = "AI 正常回复中。"; return;
+    }
+    state.textContent = tenantHandoffLabels[tenantActiveHandoff.status] || tenantActiveHandoff.status; state.className = `state-badge handoff-${tenantActiveHandoff.status}`;
+    tenantSession.humanMode = ["pending", "in_progress", "awaiting_confirmation"].includes(tenantActiveHandoff.status);
+    actions.hidden = tenantActiveHandoff.status !== "awaiting_confirmation";
+    description.textContent = tenantActiveHandoff.status === "awaiting_confirmation" ? "人工客服申请结束，请在 10 分钟内确认。" : "人工服务期间消息不会交给 AI。";
+    await Demo.loadMessages(tenantSession, $("messages"));
+  } catch (error) { Demo.setStatus($("chat-status"), error.message, true); }
+}
+async function respondToTenantHandoff(confirm) {
+  if (!tenantActiveHandoff) return;
+  try {
+    tenantActiveHandoff = await Demo.api(`/handoffs/${tenantActiveHandoff.id}/close-response`, { method: "POST", token: tenantSession.token, body: JSON.stringify({ confirm }) });
+    if (confirm) { tenantActiveHandoff = null; tenantSession.humanMode = false; }
+    Demo.setStatus($("chat-status"), confirm ? "人工会话已结束，AI 客服已恢复。" : "已通知人工客服继续处理。");
+    await loadTenantHandoff();
+  } catch (error) { Demo.setStatus($("chat-status"), error.message, true); }
+}
+$("tenant-confirm-handoff-close").addEventListener("click", () => respondToTenantHandoff(true));
+$("tenant-continue-handoff").addEventListener("click", () => respondToTenantHandoff(false));
+
 Demo.bindComposer($("chat-form"), $("chat-input"), $("chat-status"), () => tenantSession, $("messages"));
+setInterval(loadTenantHandoff, 2000);
 
 const managedMode = new URLSearchParams(window.location.search).get("managed") === "1";
 const sessionKey = managedMode ? "platformTenantSession" : "tenantWorkbenchSession";

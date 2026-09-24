@@ -169,9 +169,10 @@ async function loadActiveHandoff() {
     const result = await Demo.api(`/handoffs/active?conversation_id=${customerSession.conversationId}`, { token: customerSession.token });
     currentHandoff = result.handoff;
     const state = $("handoff-state");
-    if (!currentHandoff) { state.textContent = "未发起或已结束"; state.className = "state-badge off"; $("handoff-close-actions").hidden = true; customerSession.humanMode = false; return; }
+    if (!currentHandoff) { state.textContent = "未发起或已结束"; state.className = "state-badge off"; $("handoff-close-actions").hidden = true; $("handoff-close-prompt").hidden = true; customerSession.humanMode = false; return; }
     state.textContent = handoffLabels[currentHandoff.status] || currentHandoff.status; state.className = `state-badge handoff-${currentHandoff.status}`;
     $("handoff-close-actions").hidden = currentHandoff.status !== "awaiting_confirmation";
+    $("handoff-close-prompt").hidden = currentHandoff.status !== "awaiting_confirmation";
     customerSession.humanMode = ["pending", "in_progress", "awaiting_confirmation"].includes(currentHandoff.status);
     if (currentHandoff.status === "awaiting_confirmation") Demo.setStatus($("handoff-status"), "客服申请结束人工服务，请在 10 分钟内确认；未回应将自动结束。");
     if (currentHandoff.status === "in_progress") Demo.setStatus($("handoff-status"), "人工客服处理中，AI 已暂停回复。");
@@ -179,8 +180,26 @@ async function loadActiveHandoff() {
   } catch (error) { Demo.setStatus($("handoff-status"), error.message, true); }
 }
 $("handoff-button").addEventListener("click", async () => { if (!requireSession($("handoff-status"))) return; try { currentHandoff = await Demo.api("/handoffs", { method: "POST", token: customerSession.token, body: JSON.stringify({ conversation_id: customerSession.conversationId, summary: "家长请求人工客服协助", reason: "explicit_request", attempted_actions: ["self_service_portal", "rag_assistant"] }) }); customerSession.humanMode = true; Demo.setStatus($("handoff-status"), "人工请求已提交，当前状态：待处理。"); await loadActiveHandoff(); } catch (error) { Demo.setStatus($("handoff-status"), error.message, true); } });
-$("confirm-handoff-close").addEventListener("click", async () => { if (!currentHandoff) return; await Demo.api(`/handoffs/${currentHandoff.id}/close-response`, { method: "POST", token: customerSession.token, body: JSON.stringify({ confirm: true }) }); currentHandoff = null; customerSession.humanMode = false; Demo.setStatus($("handoff-status"), "人工客服已结束。"); await loadActiveHandoff(); });
-$("continue-handoff").addEventListener("click", async () => { if (!currentHandoff) return; currentHandoff = await Demo.api(`/handoffs/${currentHandoff.id}/close-response`, { method: "POST", token: customerSession.token, body: JSON.stringify({ confirm: false }) }); Demo.setStatus($("handoff-status"), "已通知客服继续处理。"); await loadActiveHandoff(); });
+async function respondToHandoffClose(confirm) {
+  if (!currentHandoff) return;
+  const buttons = [$("confirm-handoff-close"), $("continue-handoff"), $("prompt-confirm-handoff-close"), $("prompt-continue-handoff")];
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const result = await Demo.api(`/handoffs/${currentHandoff.id}/close-response`, { method: "POST", token: customerSession.token, body: JSON.stringify({ confirm }) });
+    currentHandoff = confirm ? null : result;
+    customerSession.humanMode = !confirm;
+    const message = confirm ? "人工客服已结束，后续消息将由 AI 客服处理。" : "已通知客服问题尚未解决，将继续人工服务。";
+    Demo.setStatus($("handoff-status"), message); Demo.setStatus($("handoff-close-prompt-status"), message);
+    if (confirm) $("handoff-close-prompt").hidden = true;
+    await loadActiveHandoff();
+  } catch (error) {
+    Demo.setStatus($("handoff-close-prompt-status"), error.message, true);
+  } finally { buttons.forEach((button) => { button.disabled = false; }); }
+}
+$("confirm-handoff-close").addEventListener("click", () => respondToHandoffClose(true));
+$("continue-handoff").addEventListener("click", () => respondToHandoffClose(false));
+$("prompt-confirm-handoff-close").addEventListener("click", () => respondToHandoffClose(true));
+$("prompt-continue-handoff").addEventListener("click", () => respondToHandoffClose(false));
 
 async function loadReminders() {
   if (!customerSession) return;

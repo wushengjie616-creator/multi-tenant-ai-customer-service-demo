@@ -197,6 +197,32 @@ async def test_offline_handoff_message_is_saved_without_ai_reply(client, make_us
     ]
 
 
+async def test_offline_message_becomes_customer_visible_after_agent_accepts_and_requests_close(
+    client, make_user, make_conversation
+):
+    customer = await make_user()
+    agent = await make_user(tenant_id=customer["tenant_id"], role="agent")
+    conversation = await make_conversation(customer["tenant_id"], customer["user_id"])
+    created = await client.post(
+        "/handoffs", headers=headers(customer),
+        json={"conversation_id": conversation, "summary": "离线留言", "reason": "offline_message", "message": "请联系我"},
+    )
+    handoff_id = created.json()["id"]
+
+    before_accept = await client.get(
+        f"/handoffs/active?conversation_id={conversation}", headers=headers(customer)
+    )
+    assert before_accept.json()["handoff"] is None
+
+    await client.post(f"/admin/handoffs/{handoff_id}/accept", headers=headers(agent))
+    await client.post(f"/admin/handoffs/{handoff_id}/request-close", headers=headers(agent))
+    awaiting = await client.get(
+        f"/handoffs/active?conversation_id={conversation}", headers=headers(customer)
+    )
+
+    assert awaiting.json()["handoff"]["status"] == "awaiting_confirmation"
+
+
 async def test_admin_can_list_and_reply_only_to_own_tenant_handoffs(
     client, make_user, make_conversation
 ):

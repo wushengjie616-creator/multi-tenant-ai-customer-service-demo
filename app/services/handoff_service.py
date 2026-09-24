@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_trace_id
@@ -43,7 +43,7 @@ async def get_active(session: AsyncSession, tenant_id, conversation_id) -> Hando
         Handoff.tenant_id == tenant_id,
         Handoff.conversation_id == conversation_id,
         Handoff.active_key == "active",
-        Handoff.reason != "offline_message",
+        or_(Handoff.reason != "offline_message", Handoff.status != "pending"),
     ))
 
 
