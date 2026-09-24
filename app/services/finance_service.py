@@ -3,6 +3,7 @@
 import uuid
 
 from app.services import audit_service
+from app.core.metrics import TOOL_CALLS
 from app.utils.masking import mask_value
 
 
@@ -47,6 +48,7 @@ async def query_with_audit(session, client, *, kind: str, tenant_id: str, user_i
     except Exception as exc:
         result = safe_finance_result(None, error=type(exc).__name__)
         outcome, detail = "failed", {"error": type(exc).__name__}
+    TOOL_CALLS.labels(f"finance.{kind}", outcome).inc()
     await audit_service.record_audit(
         session, tenant_id=uuid.UUID(tenant_id), actor_id=user_id,
         action=f"finance.{kind}", target=f"user:{user_id}", outcome=outcome, detail=detail,

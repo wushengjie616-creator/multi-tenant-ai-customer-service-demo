@@ -7,9 +7,10 @@
 """
 
 import asyncio
+import json
 
 from fastapi import FastAPI, Header
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="mock-llm")
@@ -34,6 +35,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
+    stream: bool = False
 
 
 def build_reply(messages: list[ChatMessage]) -> str:
@@ -110,6 +112,19 @@ async def chat_completions(
         return Response(content=body, media_type="application/json")
 
     reply = build_reply(req.messages)
+    if req.stream:
+        async def event_stream():
+            for index in range(0, len(reply), 12):
+                chunk = reply[index : index + 12]
+                yield "data: " + json.dumps(
+                    {"choices": [{"delta": {"content": chunk}}]},
+                    ensure_ascii=False,
+                ) + "\n\n"
+                await asyncio.sleep(0)
+            yield 'data: {"choices":[],"usage":{"prompt_tokens":0,"completion_tokens":0}}\n\n'
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
     return {
         "choices": [{"message": {"role": "assistant", "content": reply}}],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0},

@@ -9,6 +9,9 @@ x-app-env: &app-env
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://eduai:eduai_password@postgres:5432/eduai}
   DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql+psycopg2://eduai:eduai_password@postgres:5432/eduai}
+  DATABASE_POOL_SIZE: ${DATABASE_POOL_SIZE:-20}
+  DATABASE_MAX_OVERFLOW: ${DATABASE_MAX_OVERFLOW:-20}
+  DATABASE_POOL_TIMEOUT_SECONDS: ${DATABASE_POOL_TIMEOUT_SECONDS:-10}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
   REDIS_MAX_CONNECTIONS: ${REDIS_MAX_CONNECTIONS:-50}
   CONTEXT_MAX_MESSAGES: ${CONTEXT_MAX_MESSAGES:-20}
@@ -52,6 +55,10 @@ x-app-env: &app-env
   DEMO_MAX_UPLOAD_CHARS: ${DEMO_MAX_UPLOAD_CHARS:-200000}
   KNOWLEDGE_LEXICAL_SCAN_LIMIT: ${KNOWLEDGE_LEXICAL_SCAN_LIMIT:-500}
   RAG_SEMANTIC_CANDIDATE_LIMIT: ${RAG_SEMANTIC_CANDIDATE_LIMIT:-40}
+  WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-32}
+  WORKER_FETCH_BATCH: ${WORKER_FETCH_BATCH:-128}
+  WORKER_METRICS_PORT: ${WORKER_METRICS_PORT:-9101}
+  METRICS_COLLECTION_SECONDS: ${METRICS_COLLECTION_SECONDS:-5}
 
 x-external-dns: &external-dns
   - ${DOCKER_DNS_PRIMARY:-223.5.5.5}
@@ -150,6 +157,51 @@ services:
       retries: 5
       start_period: 15s
 
+  # 第二 API 实例用于验证 WebSocket 跨副本广播；生产由外部 LB 统一入口。
+  api-replica:
+    image: education-ai-service-app:latest
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment: *app-env
+    dns: *external-dns
+    ports:
+      - "${API_REPLICA_PORT:-8001}:8000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      otel-collector: { condition: service_started }
+      demo-bootstrap: { condition: service_completed_successfully }
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  api-replica-2:
+    image: education-ai-service-app:latest
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    environment: *app-env
+    dns: *external-dns
+    ports:
+      - "${API_REPLICA_2_PORT:-8002}:8000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      otel-collector: { condition: service_started }
+      demo-bootstrap: { condition: service_completed_successfully }
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
   demo-bootstrap:
     image: education-ai-service-app:latest
     command: sh -c "alembic upgrade head && python -m scripts.bootstrap_demo"
@@ -170,6 +222,24 @@ services:
       nats: { condition: service_healthy }
       qdrant: { condition: service_healthy }
       demo-bootstrap: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      api: { condition: service_healthy }
+      api-replica: { condition: service_healthy }
+      api-replica-2: { condition: service_healthy }
+      worker: { condition: service_started }
     restart: unless-stopped
 
   scheduler:
@@ -223,3 +293,4 @@ services:
 volumes:
   pgdata:
   qdrant_storage:
+  prometheus_data:

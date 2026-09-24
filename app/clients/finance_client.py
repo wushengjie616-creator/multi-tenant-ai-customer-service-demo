@@ -5,6 +5,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.circuit_breaker import AsyncCircuitBreaker
+from app.core.metrics import CIRCUIT_BREAKER_STATE
 
 
 class FinanceClient:
@@ -19,7 +20,12 @@ class FinanceClient:
                 response = await self.client.get(f"/finance/{kind}", params={"tenant_id": tenant_id, "user_id": user_id})
                 response.raise_for_status()
                 return response.json()
-        return await self.breaker.call(request)
+        try:
+            return await self.breaker.call(request)
+        finally:
+            CIRCUIT_BREAKER_STATE.labels("finance").set(
+                {"closed": 0, "half_open": 1, "open": 2}[self.breaker.state]
+            )
 
     async def close(self):
         await self.client.aclose()

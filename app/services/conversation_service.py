@@ -163,6 +163,7 @@ async def save_reply(
     complete_message_id: str,
     user_id: str,
     trace_id: str,
+    streamed: bool = False,
 ) -> None:
     """落库机器人回复 + im.outbound outbox 同事务；并把对应入站置为 completed。"""
     envelope = EventEnvelope(
@@ -176,6 +177,7 @@ async def save_reply(
             "conversation_id": str(conversation_id),
             "content": content,
             "in_reply_to": complete_message_id,
+            "streamed": streamed,
         },
     )
     session.add(

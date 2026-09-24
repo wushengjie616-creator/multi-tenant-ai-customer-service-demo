@@ -167,6 +167,23 @@ async def test_reminder_and_handoff_are_owned_and_idempotent(client, make_user, 
     assert "parent@example.com" not in first.json()["summary"]
 
 
+async def test_reminder_parse_returns_candidate_but_does_not_create_row(
+    client, make_user, make_conversation
+):
+    user = await make_user()
+    conversation = await make_conversation(user["tenant_id"], user["user_id"])
+    parsed = await client.post(
+        "/reminders/parse",
+        json={"conversation_id": conversation, "text": "明天晚上7点提醒我上数学课"},
+        headers=headers(user),
+    )
+    assert parsed.status_code == 200
+    assert parsed.json()["needs_confirmation"] is True
+    assert parsed.json()["content"] == "上数学课"
+    listed = await client.get("/reminders", headers=headers(user))
+    assert listed.json()["reminders"] == []
+
+
 async def test_reminder_supports_lead_time_and_exposes_target_time(client, make_user, make_conversation):
     user = await make_user()
     conversation = await make_conversation(user["tenant_id"], user["user_id"])

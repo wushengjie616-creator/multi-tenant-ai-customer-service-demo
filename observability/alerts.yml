@@ -1,0 +1,51 @@
+groups:
+  - name: education-ai-service
+    rules:
+      - alert: EduAIAPIDown
+        expr: up{job="api"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "AI 客服 API 不可用"
+      - alert: EduAIWorkerDown
+        expr: up{job="message-worker"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "消息 Worker 不可用"
+      - alert: EduAIInboundQueueBacklog
+        expr: eduai_queue_pending{consumer="im-inbound-worker"} > 500
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "入站队列持续积压"
+      - alert: EduAIInboundAckBacklog
+        expr: eduai_queue_ack_pending{consumer="im-inbound-worker"} > 128
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Worker 已投递未 ACK 消息过多"
+      - alert: EduAIDeadLetterDetected
+        expr: eduai_dead_letters_open > 0 or increase(eduai_dead_letters_total[10m]) > 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "检测到未处理死信"
+      - alert: EduAIOutboxFailed
+        expr: eduai_outbox_events{status="failed"} > 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Outbox 事件发布失败"
+      - alert: EduAIDownstreamCircuitOpen
+        expr: eduai_circuit_breaker_state >= 2
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "下游服务熔断器已打开"
+      - alert: EduAIHTTPErrorRateHigh
+        expr: sum(rate(eduai_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(eduai_http_requests_total[5m])), 0.001) > 0.01
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "API 5xx 比例超过 1%"

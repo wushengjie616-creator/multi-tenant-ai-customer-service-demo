@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-24T18:14:31+08:00",
-  "command": "make acceptance",
+  "generated_at": "2026-09-24T23:11:46+08:00",
+  "command": "isolated Compose equivalent acceptance gate",
   "exit_code": 0,
   "unit_and_integration": {
-    "passed": 220,
+    "passed": 235,
     "failed": 0,
-    "coverage_percent": 76.14,
+    "coverage_percent": 76.03,
     "coverage_threshold_percent": 70
   },
   "e2e": {

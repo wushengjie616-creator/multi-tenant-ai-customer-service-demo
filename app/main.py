@@ -27,6 +27,7 @@ from app.core.tracing import configure_tracing
 from app.middleware.rate_limit import allowed as rate_allowed
 from app.schemas.event import SCHEMA_VERSION
 from app.services.outbox_relay import relay_loop
+from app.services.metrics_collector import collection_loop
 
 log = get_logger(__name__)
 
@@ -49,6 +50,9 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(websocket.run_outbound_consumer()))
         # 发布本进程写入的 im.inbound outbox 事件
         tasks.append(asyncio.create_task(relay_loop(js, async_session)))
+        tasks.append(asyncio.create_task(collection_loop(
+            js, async_session, interval_seconds=settings.metrics_collection_seconds
+        )))
 
     log.info("api started, schema_version=%s", SCHEMA_VERSION)
     yield

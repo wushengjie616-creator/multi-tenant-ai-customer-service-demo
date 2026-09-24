@@ -35,6 +35,7 @@
 | `GET /platform/{course-schedule|study-report}` | authenticated | 按 token 身份查询课程表/学习报告 |
 | `POST /commands/{submit-leave|update-course-reminder}` | conversation owner | 低风险平台写操作，要求客户端幂等键；同 key 更换资源/参数返回 `409 IDEMPOTENCY_CONFLICT` |
 | `POST/GET /reminders` | user | 创建/查询自己的提醒；`lead_time_minutes` 控制提前通知 |
+| `POST /reminders/parse` | conversation owner | 把自然语言时间解析为 `needs_confirmation=true` 的候选；绝不直接创建 |
 | `PATCH/DELETE /reminders/{id}` | owner | 乐观版本修改/取消 |
 | `POST /handoffs` | conversation owner | 幂等创建人工转接并投递上下文包；可携带 `message` 保存不触发 AI 的离线留言 |
 | `GET /admin/handoffs` | admin | 查看当前租户的人工会话队列 |
@@ -64,7 +65,11 @@ Mock IM 入站 WebSocket 使用 `/ws?conversation_id=<id>&token=<customer-jwt>`�
 {"type":"message.send","payload":{"message_id":"client-001","content":"你好"}}
 ```
 
-服务端先返回 `message.accepted`，异步处理完成后依次返回 `reply.start`、一个或多个 `reply.chunk`（含 `sequence/delta`）和 `reply.end`（含完整 `content`）。客户端可按序拼接 delta，并以 end 内容核对。
+服务端先返回 `message.accepted`。对用户可见的 LLM 生成，worker 直接消费上游 SSE，通过不持久化的 NATS Core 主题立即转发 `reply.start` 和带 `sequence/delta` 的 `reply.chunk`；完整结果落 PostgreSQL/outbox 后再发 `reply.end`。因此首块不需等待整段生成，而断线重连仍以持久化完整消息恢复。非 LLM 回复保持 start/chunk/end 兼容格式。
+
+RAG 对短追问中的“那个/它/多少钱/呢”等指代，先使用当前租户、当前会话的持久化摘要与最近消息改写为独立检索问句，再进入原有证据门和服务端引用校验；改写失败会保守降级，不会跨会话或跨租户取上下文。
+
+AI 转人工和 `POST /handoffs` 都会额外执行一次受约束的摘要请求，生成 `summary / intent / attempted_actions / risk_notes / recent_turns`，并在坐席工作台展示。摘要异常时使用确定性摘要，且写入前统一脱敏。
 
 ## 事件封装
 

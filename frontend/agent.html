@@ -4,6 +4,7 @@
   <div class="agent-layout">
     <section class="panel section-panel"><div class="section-heading"><div><span class="eyebrow">QUEUE</span><h2>人工会话队列</h2></div></div><div id="handoff-list" class="data-list"><div class="empty compact">正在读取会话…</div></div><div id="handoff-list-status" class="status"></div></section>
     <section class="panel section-panel"><div class="section-heading"><div><span class="eyebrow">CONVERSATION</span><h2 id="thread-title">请选择会话</h2><p id="thread-state" class="hint">选择左侧会话后才能回复。</p></div><div class="row"><button id="accept-handoff" class="button secondary" disabled>接入会话</button><button id="request-close" class="button danger" disabled>发起结束</button></div></div>
+      <div id="handoff-context" class="panel" hidden></div>
       <div id="agent-messages" class="messages"><div class="empty">尚未选择人工会话。</div></div>
       <div class="template-panel"><strong>常用话术模板</strong><div id="reply-templates" class="suggestion-list"></div><span class="hint">点击模板会填入输入框，确认内容后可一键发送。</span></div>
       <form id="agent-reply-form" class="composer"><input id="agent-reply-input" placeholder="输入人工回复" required disabled><button class="button" type="submit" disabled>发送回复</button></form><div id="agent-status" class="status"></div>

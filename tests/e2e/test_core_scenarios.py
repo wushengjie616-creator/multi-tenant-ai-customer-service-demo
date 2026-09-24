@@ -201,7 +201,9 @@ async def test_e2e_08_invalid_llm_json_is_safe_and_calls_no_tool():
         before = (await raw.get("http://mock-platform:8103/calls")).json()["count"]
         await raw.put("http://mock-llm:8101/control", json={"body": "not-json"})
         try:
-            payload = {"message_id": message_id, "tenant_id": str(DEMO_TENANT_ID), "user_id": str(DEMO_USER_ID), "conversation_id": str(DEMO_CONVERSATION_ID), "content": "你好"}
+            # "你好" now uses the deterministic high-volume fast path; use a
+            # non-fast chitchat phrase to exercise malformed provider output.
+            payload = {"message_id": message_id, "tenant_id": str(DEMO_TENANT_ID), "user_id": str(DEMO_USER_ID), "conversation_id": str(DEMO_CONVERSATION_ID), "content": "你是谁"}
             async with httpx.AsyncClient(base_url=API_URL, headers=auth_headers(), timeout=5) as client:
                 assert (await client.post("/webhooks/im/messages", json=payload)).status_code == 202
                 deadline = asyncio.get_running_loop().time() + 8

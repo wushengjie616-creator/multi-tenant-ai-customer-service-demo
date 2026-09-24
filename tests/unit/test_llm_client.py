@@ -1,4 +1,5 @@
 import httpx
+import json
 
 from app.clients.llm_client import LLMClient, extract_reply
 
@@ -92,3 +93,45 @@ async def test_llm_client_masks_pii_at_the_provider_boundary():
     assert "parent@example.com" not in sent
     assert "138****5678" in sent
     assert "p***@example.com" in sent
+
+
+async def test_llm_client_streams_provider_deltas_before_returning_full_reply():
+    observed = []
+
+    async def handler(request: httpx.Request):
+        body = json.loads(request.content)
+        assert body["stream"] is True
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=(
+                'data: {"choices":[{"delta":{"content":"你好"}}]}\n\n'
+                'data: {"choices":[{"delta":{"content":"，同学"}}]}\n\n'
+                'data: [DONE]\n\n'
+            ),
+        )
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = LLMClient(client=http_client)
+    try:
+        reply = await client.generate_stream(
+            [{"role": "user", "content": "你好"}], observed.append
+        )
+    finally:
+        await client.close()
+
+    assert observed == ["你好", "，同学"]
+    assert reply == "你好，同学"
+
+
+async def test_llm_client_rejects_200_response_without_any_sse_delta():
+    async def handler(request: httpx.Request):
+        return httpx.Response(200, content="not-an-sse-stream")
+
+    client = LLMClient(client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    try:
+        import pytest
+        with pytest.raises(ValueError, match="no content delta"):
+            await client.generate_stream([{"role": "user", "content": "你是谁"}], lambda _: None)
+    finally:
+        await client.close()

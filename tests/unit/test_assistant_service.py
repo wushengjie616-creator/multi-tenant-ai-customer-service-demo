@@ -36,7 +36,7 @@ async def test_invalid_llm_response_uses_fixed_safe_fallback(monkeypatch):
     llm = AsyncMock()
     llm.generate.side_effect = ValueError("invalid json")
     monkeypatch.setattr(assistant_service, "llm_client", llm)
-    reply = await assistant_service.generate_reply(None, {"content": "你好", "tenant_id": "t", "user_id": "u", "conversation_id": "c"})
+    reply = await assistant_service.generate_reply(None, {"content": "你是谁", "tenant_id": "t", "user_id": "u", "conversation_id": "c"})
     assert reply == "智能回复暂时不可用，请稍后重试或回复“转人工”。"
 
 
@@ -149,6 +149,26 @@ async def test_fixed_virtual_tenant_does_not_offer_cancel_when_auto_renew_is_off
         "conversation_id": "20000000-0000-0000-0000-000000000201",
     })
     assert reply == "你未开启自动续费，不用取消。"
+
+
+async def test_common_greeting_uses_fast_path_without_llm(monkeypatch):
+    """高频确定性问候不应占用 DeepSeek 全局 20 starts/s 配额。"""
+    async def should_not_call(*args, **kwargs):
+        raise AssertionError("greeting unexpectedly reached LLM")
+
+    monkeypatch.setattr(assistant_service.llm_client, "generate", should_not_call)
+    reply = await assistant_service.generate_reply(
+        None,
+        {
+            "tenant_id": "90000000-0000-0000-0000-000000000001",
+            "user_id": "90000000-0000-0000-0000-000000000002",
+            "conversation_id": "90000000-0000-0000-0000-000000000003",
+            "message_id": "greeting-fast-path",
+            "content": "你好",
+        },
+    )
+
+    assert "您好" in reply
 
 
 async def test_real_tenant_without_handoff_feature_does_not_claim_transfer(monkeypatch):
@@ -331,3 +351,78 @@ async def test_unknown_intent_searches_tenant_knowledge_before_declining(monkeyp
         semantic_reranker=llm,
     )
     assert reply == "我们位于示例路 8 号。\n来源：联系方式"
+
+
+async def test_rag_followup_is_rewritten_from_same_conversation_context(monkeypatch):
+    context = AsyncMock()
+    context.get_for_llm.return_value = [
+        {"role": "user", "content": "数学思维进阶班适合几年级？"},
+        {"role": "assistant", "content": "适合三到四年级。"},
+    ]
+    llm = AsyncMock()
+    llm.generate.side_effect = [
+        '{"query":"数学思维进阶班的学费是多少？"}',
+        "该班学费为 3999 元。",
+    ]
+    rag = AsyncMock(return_value={
+        "answer": "数学思维进阶班学费 3999 元。",
+        "evidence_level": "SUPPORTED",
+        "citations": [{"title": "课程与收费", "chunk_id": "c1", "source": "doc"}],
+    })
+    monkeypatch.setattr(assistant_service, "llm_client", llm)
+    monkeypatch.setattr(assistant_service, "answer_question", rag)
+    monkeypatch.setattr(
+        assistant_service, "classify_intent",
+        lambda _: IntentResult(intent="pricing", confidence=1, source="rule"),
+    )
+
+    reply = await assistant_service.generate_reply(None, {
+        "message_id": "m2", "content": "那多少钱？", "tenant_id": "tenant-a",
+        "user_id": "user-a", "conversation_id": "conversation-a",
+    }, context_store=context)
+
+    assert "3999" in reply
+    assert rag.await_args.args[2] == "数学思维进阶班的学费是多少？"
+
+
+async def test_handoff_context_uses_llm_summary_and_structured_agent_fields():
+    llm = AsyncMock()
+    llm.generate.return_value = (
+        '{"summary":"家长咨询退费，知识库回答后仍需人工协助",'
+        '"intent":"refund_support","attempted_actions":["rag_search"],'
+        '"risk_notes":["可能涉及财务操作"]}'
+    )
+    context = AsyncMock()
+    context.get_for_llm.return_value = [
+        {"role": "user", "content": "退费多久到账？"},
+        {"role": "assistant", "content": "7-15 个工作日。"},
+    ]
+
+    package = await assistant_service.build_handoff_context(
+        None,
+        {"tenant_id": "tenant-a", "conversation_id": "conversation-a", "message_id": "m3"},
+        "还是转人工吧",
+        reason="explicit_request",
+        context_store=context,
+        tenant_llm=llm,
+    )
+
+    assert package["summary"].startswith("家长咨询退费")
+    assert package["context"]["intent"] == "refund_support"
+    assert package["context"]["attempted_actions"] == ["rag_search"]
+    assert package["context"]["recent_turns"] == 2
+
+
+async def test_handoff_context_falls_back_when_summary_provider_is_unavailable():
+    llm = AsyncMock()
+    llm.generate.side_effect = RuntimeError("provider unavailable")
+    package = await assistant_service.build_handoff_context(
+        None,
+        {"tenant_id": "tenant-a", "conversation_id": "conversation-a"},
+        "请转人工处理退费",
+        reason="explicit_request",
+        context_store=None,
+        tenant_llm=llm,
+    )
+    assert package["summary"] == "用户申请人工协助：请转人工处理退费"
+    assert package["context"]["intent"] == "human_handoff"

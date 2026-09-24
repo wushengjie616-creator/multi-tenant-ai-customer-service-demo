@@ -15,8 +15,9 @@
 - **多租户隔离与安全**：JWT 认证 + RBAC（`user` / `agent` / `admin`）；租户与资源归属强制校验；PII 脱敏；审计日志；LLM 无工具执行权限。
 - **人工转接**：连续两次不满触发，投递脱敏后的上下文包，在线/离线分别处理。
 - **提前提醒**：事项时间与通知时间分开持久化，支持到点、提前 30 分钟、1 小时或自定义分钟数。
-- **高并发治理**：tenant/user 双维限流（Lua 原子计数）、下游独立超时/重试/熔断、Redis 热上下文缓存（PostgreSQL 为事实源，故障自动回填）。
-- **可观测**：Prometheus 指标、JSON 结构化日志（自动脱敏）、OpenTelemetry trace 贯穿 API → NATS → worker → 下游。
+- **高并发治理**：tenant/user 双维限流（Lua 原子计数）、下游独立超时/重试/熔断、Worker pull batch 有界并发（同会话串行）、Redis 热上下文缓存。
+- **多副本 WebSocket**：JetStream 持久化 + NATS Core 每副本广播，连接位于任意 API 副本都能收到在线回复。
+- **可观测**：Prometheus 采集 API/Worker、队列、LLM/Token、工具、熔断、死信、Outbox 与人工会话指标，配套告警；JSON 日志与 OpenTelemetry trace 贯穿全链路。
 
 ## 技术栈
 
@@ -245,6 +246,7 @@ docker compose run --rm demo-bootstrap
 | `make ps` | 查看服务状态 |
 | `make migrate` | 执行数据库迁移 |
 | `make seed` | 初始化演示数据（租户/用户/会话） |
+| `make seed-loadtest` | 初始化确定性多租户/多会话压测身份池 |
 | `make test` | 容器内运行全部 pytest |
 | `make loadtest` | Locust 可配置混合 smoke |
 | `make loadtest-stable` | 20 msg/s 稳定消息接入 |
@@ -260,6 +262,9 @@ docker compose run --rm demo-bootstrap
 | 服务 | 端口 | 说明 |
 |---|---|---|
 | api | 8000 | HTTP/WS 入口 + OpenAPI `/docs` |
+| api-replica | 8001 | 第二 API/WS 副本，用于横向广播验证 |
+| api-replica-2 | 8002 | 第三 API/WS 副本，用于横向广播验证 |
+| prometheus | 9090 | 指标查询与告警状态 |
 | mock-im | 8100 | IM 收发/在线状态/推送记录 |
 | mock-llm | 8101 | 流式/延迟/500/非法 JSON/幻觉注入 |
 | mock-knowledge | 8102 | 检索片段、来源、score |
@@ -277,7 +282,7 @@ docker compose run --rm demo-bootstrap
 
 ## 压测报告
 
-四组面试规模压测已执行并记录在 **[`report/压测报告.md`](report/压测报告.md)**：
+面试规模压测汇总记录在 **[`report/压测报告.md`](report/压测报告.md)**；本轮多 worker 调参、无效轮次、成本保护和 outbox 根因定位的完整过程见 **[`report/压测调试全过程.md`](report/压测调试全过程.md)**：
 
 - 环境：macOS arm64 + Colima，Docker Compose 本地完整环境。
 - 结果：20.08 msg/s 稳定接入、100.27 msg/s 突发、100.27 QPS 财务查询和 20% LLM 超时降级均为 **0 失败**。
@@ -316,8 +321,8 @@ report/          面试提交版报告（含压测报告）
 
 ## 已知限制
 
-正式交付结论与证据索引见 **[`report/正式验收报告.md`](report/正式验收报告.md)**；容量、WebSocket 多实例广播和 Prometheus 补齐方案见 **[`docs/optimization/06-08-delivery-optimization-plan.md`](docs/optimization/06-08-delivery-optimization-plan.md)**。
+正式交付结论与证据索引见 **[`report/正式验收报告.md`](report/正式验收报告.md)**；第 6/7/8 项的设计与实现验证分别见 **[`docs/optimization/06-08-delivery-optimization-plan.md`](docs/optimization/06-08-delivery-optimization-plan.md)** 和 **[`report/06-08实现与回归验证报告.md`](report/06-08实现与回归验证报告.md)**。
 
-- 已在本地 2C4G 环境执行 500 WS、200 msg/s 稳定流、1000 msg/s 突发、100 QPS 财务和 20% LLM 超时场景。500 WS 与财务通过；200 msg/s 入口通过但消费未追平；1000 msg/s 未达标。详见压测报告与正式验收报告。
+- 已在本地 2C4G 环境执行 500 WS、200 msg/s 稳定流、1000 msg/s 突发、100 QPS 财务和 20% LLM 超时场景；当前版本另完成 2/4 worker 阶梯复测。2 worker 达到 234.69 msg/s 零错误接入，但 PostgreSQL outbox 未同步排空，故端到端仍为 PARTIAL；1000 msg/s 当前版本复测在发现污染基线后主动停止。详见压测汇总、调试全过程与正式验收报告。
 - Redis 中断、NATS 中断和 worker 积压恢复已有 `make faulttest` 可重复证据；详见 [`report/故障注入报告.md`](report/故障注入报告.md)。
 - 确定性 embedding 负责低成本候选召回，语义弹性依赖 DeepSeek 改写与有上限的语义重排，适合演示与小型租户库，不代表大规模专用 embedding 模型的容量表现。

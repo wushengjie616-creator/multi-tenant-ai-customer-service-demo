@@ -68,6 +68,12 @@ def build_reply_events(envelope: dict, *, chunk_size: int = 64) -> list[dict]:
         return [{**common, "type": EventType.HANDOFF_STATUS, "payload": payload}]
 
     content = payload.get("content") or ""
+    if payload.get("streamed"):
+        return [{
+            **common,
+            "type": EventType.REPLY_END,
+            "payload": {**base_payload, "content": content},
+        }]
     chunks = [content[index : index + chunk_size] for index in range(0, len(content), chunk_size)]
     events = [{**common, "type": EventType.REPLY_START, "payload": base_payload}]
     events.extend(
@@ -96,21 +102,30 @@ async def _on_outbound(msg):
             await manager.push(
                 envelope.get("tenant_id"), payload.get("conversation_id"), event
             )
-        await msg.ack()
     except Exception:
         log.exception("outbound push failed")
-        await msg.nak()
+
+
+async def _on_stream(msg):
+    try:
+        event = json.loads(msg.data)
+        payload = event.get("payload", {})
+        await manager.push(
+            event.get("tenant_id"), payload.get("conversation_id"), event
+        )
+    except Exception:
+        log.exception("live stream push failed")
 
 
 async def run_outbound_consumer() -> None:
     nc = await nats_core.connect()
-    js = nc.jetstream()
-    await nats_core.ensure_stream(js)
-    await nats_core.subscribe(
-        js, nats_core.OUTBOUND_SUBJECT, durable="im-outbound-api", cb=_on_outbound
-    )
-    log.info("outbound consumer ready (%s)", nats_core.OUTBOUND_SUBJECT)
-    await asyncio.Future()
+    await nats_core.subscribe_core(nc, nats_core.OUTBOUND_SUBJECT, _on_outbound)
+    await nats_core.subscribe_core(nc, nats_core.OUTBOUND_STREAM_SUBJECT, _on_stream)
+    log.info("outbound core fan-out ready (%s)", nats_core.OUTBOUND_SUBJECT)
+    try:
+        await asyncio.Future()
+    finally:
+        await nc.close()
 
 
 @router.websocket("/ws")

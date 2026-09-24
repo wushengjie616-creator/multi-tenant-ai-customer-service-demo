@@ -104,6 +104,11 @@ function decorateAssistantReply(node, item, index, messages) {
     const time = document.createElement("input"); time.type = "datetime-local"; const next = new Date(Date.now() + 86400000); next.setHours(18, 0, 0, 0); time.value = new Date(next.getTime() - next.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     const lead = reminderLeadSelect.cloneNode(true); lead.removeAttribute("id");
     panel.append(content, time, lead, actionButton("确认创建提醒", async () => { try { const result = await Demo.api("/reminders", { method: "POST", token: customerSession.token, body: JSON.stringify({ conversation_id: customerSession.conversationId, content: content.value, run_at_local: time.value, timezone: "Asia/Shanghai", repeat: "once", lead_time_minutes: Number(lead.value) }) }); Demo.setStatus(status, `事项时间：${new Date(result.scheduled_for_at).toLocaleString("zh-CN")}，将提前 ${result.lead_time_minutes} 分钟通知。`); } catch (error) { Demo.setStatus(status, error.message, true); } }));
+    Demo.api("/reminders/parse", { method: "POST", token: customerSession.token, body: JSON.stringify({ conversation_id: customerSession.conversationId, text: question, timezone: "Asia/Shanghai" }) }).then((candidate) => {
+      content.value = candidate.content; time.value = candidate.run_at_local;
+      lead.value = String(candidate.lead_time_minutes);
+      Demo.setStatus(status, "已从对话预填充提醒，请核对后点击“确认创建提醒”。");
+    }).catch(() => {});
   } else if (/课表/.test(question)) {
     panel.append(actionButton("查看我的课表（点击可跳转至学习中心窗口）", () => { showPanel("learning"); $("load-schedule").click(); }));
   } else if (/学习报告|学习进度|成绩/.test(question)) {

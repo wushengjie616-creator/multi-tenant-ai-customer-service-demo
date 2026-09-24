@@ -5,6 +5,13 @@ import httpx
 
 from app.core.config import settings
 from app.core.circuit_breaker import AsyncCircuitBreaker
+from app.core.metrics import CIRCUIT_BREAKER_STATE
+
+
+def _record_state(breaker: AsyncCircuitBreaker) -> None:
+    CIRCUIT_BREAKER_STATE.labels("platform").set(
+        {"closed": 0, "half_open": 1, "open": 2}[breaker.state]
+    )
 
 
 class PlatformClient:
@@ -37,7 +44,10 @@ class PlatformClient:
                 response = await self.client.post(f"/tools/{action}", json=payload, headers={"Idempotency-Key": idempotency_key})
                 response.raise_for_status()
                 return response.json()
-        return await self.breaker.call(lambda: self._retry(request))
+        try:
+            return await self.breaker.call(lambda: self._retry(request))
+        finally:
+            _record_state(self.breaker)
 
     async def query(self, kind: str, tenant_id: str, user_id: str) -> dict:
         async def request():
@@ -48,7 +58,10 @@ class PlatformClient:
                 )
                 response.raise_for_status()
                 return response.json()
-        return await self.breaker.call(lambda: self._retry(request))
+        try:
+            return await self.breaker.call(lambda: self._retry(request))
+        finally:
+            _record_state(self.breaker)
 
     async def close(self):
         await self.client.aclose()

@@ -6,6 +6,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 
 from app.core.logging import get_logger
+from app.core.metrics import LLM_GATE_INFLIGHT
 
 log = get_logger(__name__)
 
@@ -85,7 +86,11 @@ class LLMRequestGate:
     @asynccontextmanager
     async def slot(self):
         request_id = await self.acquire()
+        LLM_GATE_INFLIGHT.labels("global").inc()
         try:
             yield
         finally:
-            await self.release(request_id)
+            try:
+                await self.release(request_id)
+            finally:
+                LLM_GATE_INFLIGHT.labels("global").dec()

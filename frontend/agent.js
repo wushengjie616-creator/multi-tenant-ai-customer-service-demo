@@ -49,6 +49,15 @@ async function renderThread() {
   $('request-close').disabled = ended || activeHandoff.status === 'awaiting_confirmation';
   $('agent-reply-input').disabled = ended;
   $('agent-reply-form').querySelector('button').disabled = ended;
+  const contextBox = $('handoff-context'); const context = activeHandoff.context || {};
+  contextBox.replaceChildren(); contextBox.hidden = false;
+  const heading = document.createElement('strong'); heading.textContent = 'AI 转接上下文包';
+  const summary = document.createElement('p'); summary.textContent = activeHandoff.summary || '暂无摘要';
+  const meta = document.createElement('small');
+  const actions = (context.attempted_actions || []).join('、') || '无';
+  const risks = (context.risk_notes || []).join('、') || '无';
+  meta.textContent = `意图：${context.intent || '未分类'} · 已尝试：${actions} · 风险提示：${risks}`;
+  contextBox.append(heading, summary, meta);
   const data = await Demo.api(`/conversations/${activeHandoff.conversation_id}/messages`, { token: workbench.access_token });
   Demo.renderMessages($('agent-messages'), data.messages || []);
 }

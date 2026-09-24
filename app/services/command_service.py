@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.platform_client import platform_client
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
+from app.core.metrics import TOOL_CALLS
 from app.models import Confirmation, ToolExecution
 from app.services import audit_service
 
@@ -86,6 +87,7 @@ async def confirm_and_execute(session: AsyncSession, *, confirmation_id: uuid.UU
         execution.status = "succeeded"; execution.result = result; confirmation.status = "succeeded"
     except Exception as exc:
         execution.status = "failed"; execution.result = {"error": type(exc).__name__}; confirmation.status = "failed"
+    TOOL_CALLS.labels(f"platform.{confirmation.action}", execution.status).inc()
     await audit_service.record_audit(
         session, tenant_id=tenant_id, actor_id=user_id,
         action=f"platform.command.{confirmation.action}",
@@ -155,6 +157,7 @@ async def execute_idempotent(
     except Exception as exc:
         execution.status = "failed"
         execution.result = {"error": type(exc).__name__}
+    TOOL_CALLS.labels(f"platform.{action}", execution.status).inc()
     await audit_service.record_audit(
         session, tenant_id=tenant_id, actor_id=user_id,
         action=f"platform.command.{action}", target=f"resource:{resource_id}",

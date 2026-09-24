@@ -50,15 +50,17 @@ assistant_service -> LLM（历史正序 + 当前 user message）
 
 ## 2. 队列与重试 / 死信策略
 
-- 入站 subject `im.inbound`，出站 `im.outbound`，提醒 `reminder.due`，重试 `tool.retry`，死信 `deadletter.*`。
+- 入站 subject `im.inbound`，出站 `im.outbound`，提醒 `reminder.due`，重试 `tool.retry`，死信 `deadletter.*`。入站 Worker 使用 pull batch 和有界并发，同一 tenant/conversation 在同一批内串行。
 - 使用 JetStream stream + durable consumer + 显式 ACK/NAK + 最大投递次数（max deliver）+ 指数退避重试。
 - 至少一次投递；outbox 发布时用 `event_id` 作为 JetStream `Nats-Msg-Id` 压缩崩溃窗口的重复事件，消费端再以业务幂等键（如 `tenant_id + message_id`、`reminder occurrence id`）保证恰好一次业务效果。
+- `im.outbound` 同时被 NATS Core 非 queue-group subscription 广播到每个 API 副本，仅持有目标本地连接的副本推送；断线恢复仍以 PostgreSQL 为事实源。
 - 仅重试可恢复错误，指数退避 + 抖动，超过最大投递次数后进入死信 subject 并计数指标。禁止无限重试。
 
 ## 3. WebSocket 事件格式（冻结）
 
 - 连接：`WS /ws`。客户端事件：`message.send`、`message.ack`、`connection.resume`。
 - 服务端事件：`message.accepted`、`reply.start`、`reply.chunk`、`reply.end`、`reply.error`、`reminder.triggered`、`handoff.status`。
+- LLM 的 `reply.chunk` 来自上游 SSE 真实 token 流，经 `im.outbound.stream` 的 NATS Core 广播；完整回复才进 PostgreSQL + outbox + JetStream，兼顾首 token 延迟与断线恢复。
 - 统一事件封装 `EventEnvelope`：`event_id`、`trace_id`、`traceparent`、`tenant_id`、`occurred_at`、`schema_version`、`type`、`payload`。`traceparent` 用于 API→NATS→worker 的 W3C trace 上下文续接。
 - 入站消息最小字段：`message_id`、`tenant_id`、`user_id`、`conversation_id`、`content`、`timestamp`。见 `app/schemas/message.py`。
 

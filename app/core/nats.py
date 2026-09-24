@@ -15,6 +15,9 @@ STREAM_SUBJECTS = [
 ]
 INBOUND_SUBJECT = "im.inbound"
 OUTBOUND_SUBJECT = "im.outbound"
+# Ephemeral token deltas: deliberately excluded from JetStream persistence.
+# PostgreSQL + im.outbound retain only the authoritative completed reply.
+OUTBOUND_STREAM_SUBJECT = "im.outbound.stream"
 
 
 async def connect():
@@ -84,6 +87,46 @@ async def subscribe(js, subject: str, durable: str, cb) -> None:
     )
 
 
+async def subscribe_core(nc, subject: str, cb):
+    """Subscribe without a queue group so every API instance receives live events.
+
+    JetStream still persists the same publication for recovery/audit.  WebSocket
+    reconnects recover from PostgreSQL, while NATS Core provides replica-wide
+    live fan-out without competing for a shared durable consumer.
+    """
+    return await nc.subscribe(subject, cb=cb)
+
+
 async def pull_subscribe(js, subject: str, durable: str):
-    """创建 durable pull 订阅。"""
+    """创建 durable pull 订阅，并安全迁移旧版 push durable。"""
+    from nats.js.api import AckPolicy, ConsumerConfig, DeliverPolicy
+
+    try:
+        info = await js.consumer_info(STREAM_NAME, durable)
+    except Exception:  # noqa: BLE001 - 不存在时由 pull_subscribe 创建
+        return await js.pull_subscribe(subject, durable=durable, stream=STREAM_NAME)
+
+    if info.config.deliver_subject:
+        # Consumer type cannot be mutated in place. Continue immediately after
+        # the old ACK floor so acknowledged history isn't replayed and pending
+        # messages aren't skipped during an in-place upgrade.
+        start_sequence = max(1, info.ack_floor.stream_seq + 1)
+        await js.delete_consumer(STREAM_NAME, durable)
+        config = ConsumerConfig(
+            durable_name=durable,
+            deliver_policy=DeliverPolicy.BY_START_SEQUENCE,
+            opt_start_seq=start_sequence,
+            ack_policy=AckPolicy.EXPLICIT,
+            ack_wait=150,
+            max_deliver=5,
+            filter_subject=subject,
+        )
+        log.info(
+            "migrating push consumer to pull durable=%s start_sequence=%s",
+            durable,
+            start_sequence,
+        )
+        return await js.pull_subscribe(
+            subject, durable=durable, stream=STREAM_NAME, config=config
+        )
     return await js.pull_subscribe(subject, durable=durable, stream=STREAM_NAME)

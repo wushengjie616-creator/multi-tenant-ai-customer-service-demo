@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
+from app.core.metrics import DEAD_LETTERS
 from app.models import Conversation, DeadLetter, Message, OutboxEvent
 from app.schemas.event import EventEnvelope, EventType
 
@@ -33,6 +34,7 @@ async def record(session: AsyncSession, *, original: dict, error: Exception) -> 
     session.add(row)
     await session.commit()
     await session.refresh(row)
+    DEAD_LETTERS.labels(str(row.original_subject)).inc()
     return row
 
 

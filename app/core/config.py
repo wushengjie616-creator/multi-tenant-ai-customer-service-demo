@@ -20,11 +20,18 @@ class Settings(BaseSettings):
     database_url_sync: str = (
         "postgresql+psycopg2://eduai:eduai_password@localhost:5432/eduai"
     )
+    database_pool_size: int = 20
+    database_max_overflow: int = 20
+    database_pool_timeout_seconds: float = 10.0
     redis_url: str = "redis://localhost:6379/0"
     redis_max_connections: int = 50
     context_max_messages: int = 20
     context_ttl_seconds: int = 3600
     nats_url: str = "nats://localhost:4222"
+    worker_concurrency: int = 32
+    worker_fetch_batch: int = 128
+    metrics_collection_seconds: float = 5.0
+    worker_metrics_port: int = 9101
     qdrant_url: str = "http://localhost:6333"
     otel_exporter_otlp_endpoint: str | None = None
 

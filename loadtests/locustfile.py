@@ -1,7 +1,9 @@
 """Reproducible Locust profiles selected with ``LOADTEST_SCENARIO``."""
 
 import json
+import itertools
 import os
+import threading
 import time
 import uuid
 
@@ -9,34 +11,37 @@ from locust import HttpUser, between, constant_throughput, task
 from websockets.sync.client import connect
 
 from loadtests.config import LoadScenario, load_scenario
+from loadtests.identities import identity_for
 
-TENANT_ID = os.getenv("LOADTEST_TENANT_ID", "00000000-0000-0000-0000-000000000001")
-USER_ID = os.getenv("LOADTEST_USER_ID", "00000000-0000-0000-0000-000000000002")
-CONVERSATION_ID = os.getenv(
-    "LOADTEST_CONVERSATION_ID", "00000000-0000-0000-0000-000000000003"
-)
 SCENARIO = load_scenario()
 RATE_PER_USER = float(os.getenv("LOADTEST_RATE_PER_USER", "4"))
 MESSAGE_CONTENT = os.getenv("LOADTEST_MESSAGE_CONTENT", "请介绍课程政策")
+POOL_SIZE = int(os.getenv("LOADTEST_POOL_SIZE", "500"))
+_identity_counter = itertools.count()
+_identity_lock = threading.Lock()
 
 
-def load_token() -> str:
+def load_token(tenant_id: str, user_id: str) -> str:
     supplied = os.getenv("LOADTEST_TOKEN")
     if supplied:
         return supplied
     from app.core.security import create_access_token
 
-    return create_access_token(tenant_id=TENANT_ID, user_id=USER_ID, role="user")
-
-
-TOKEN = load_token()
+    return create_access_token(tenant_id=tenant_id, user_id=user_id, role="user")
 
 
 class AuthenticatedUser(HttpUser):
     abstract = True
 
     def on_start(self):
-        self.client.headers.update({"Authorization": f"Bearer {TOKEN}"})
+        with _identity_lock:
+            index = next(_identity_counter) % POOL_SIZE
+        identity = identity_for(index)
+        self.tenant_id = str(identity.tenant_id)
+        self.user_id = str(identity.user_id)
+        self.conversation_id = str(identity.conversation_id)
+        self.token = load_token(self.tenant_id, self.user_id)
+        self.client.headers.update({"Authorization": f"Bearer {self.token}"})
 
 
 class WebhookUser(AuthenticatedUser):
@@ -47,9 +52,9 @@ class WebhookUser(AuthenticatedUser):
     def send_message(self):
         payload = {
             "message_id": f"load-{uuid.uuid4().hex}",
-            "tenant_id": TENANT_ID,
-            "user_id": USER_ID,
-            "conversation_id": CONVERSATION_ID,
+            "tenant_id": self.tenant_id,
+            "user_id": self.user_id,
+            "conversation_id": self.conversation_id,
             "content": MESSAGE_CONTENT,
         }
         with self.client.post(
@@ -105,8 +110,8 @@ class WebSocketUser(AuthenticatedUser):
         started = time.perf_counter()
         try:
             self.ws = connect(
-                f"{ws_host}/ws?conversation_id={CONVERSATION_ID}",
-                additional_headers={"Authorization": f"Bearer {TOKEN}"},
+                f"{ws_host}/ws?conversation_id={self.conversation_id}",
+                additional_headers={"Authorization": f"Bearer {self.token}"},
                 open_timeout=5,
                 proxy=None,
                 legacy=True,
@@ -221,8 +226,8 @@ class WebSocketCapacityUser(AuthenticatedUser):
         started = time.perf_counter()
         try:
             self.ws = connect(
-                f"{ws_host}/ws?conversation_id={CONVERSATION_ID}",
-                additional_headers={"Authorization": f"Bearer {TOKEN}"},
+                f"{ws_host}/ws?conversation_id={self.conversation_id}",
+                additional_headers={"Authorization": f"Bearer {self.token}"},
                 open_timeout=5,
                 proxy=None,
                 legacy=True,
@@ -258,9 +263,9 @@ class MixedCustomerUser(WebSocketUser):
     def send_message(self):
         payload = {
             "message_id": f"load-{uuid.uuid4().hex}",
-            "tenant_id": TENANT_ID,
-            "user_id": USER_ID,
-            "conversation_id": CONVERSATION_ID,
+            "tenant_id": self.tenant_id,
+            "user_id": self.user_id,
+            "conversation_id": self.conversation_id,
             "content": "请介绍课程政策",
         }
         with self.client.post(

@@ -20,6 +20,9 @@ from app.models import Reminder
 from app.services import command_service, handoff_service, reminder_service
 from app.services import audit_service, conversation_service, identity_service
 from app.services.finance_service import safe_finance_result
+from app.services.reminder_parser import parse_reminder_candidate
+from app.services.assistant_service import build_handoff_context, llm_for_tenant
+from app.services.context_service import conversation_context
 
 router = APIRouter(tags=["business"])
 
@@ -53,6 +56,13 @@ class ReminderPatch(BaseModel):
     repeat: str | None = None
     lead_time_minutes: int | None = Field(default=None, ge=0, le=10080)
     version: int = Field(ge=1)
+
+
+class ReminderParseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    conversation_id: uuid.UUID
+    text: str = Field(min_length=1, max_length=1000)
+    timezone: str = "Asia/Shanghai"
 
 
 class HandoffRequest(BaseModel):
@@ -187,6 +197,26 @@ async def create_reminder(payload: ReminderRequest, auth: AuthContext = Depends(
     return _serialize_reminder(row)
 
 
+@router.post("/reminders/parse")
+async def parse_reminder(
+    payload: ReminderParseRequest,
+    auth: AuthContext = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """只生成待确认候选，不创建 Reminder，避免自然语言解析直接产生副作用。"""
+    if not await conversation_service.conversation_belongs_to_user(
+        session,
+        uuid.UUID(auth.tenant_id),
+        payload.conversation_id,
+        uuid.UUID(auth.user_id),
+    ):
+        raise ForbiddenError("会话不存在或不属于当前用户")
+    try:
+        return parse_reminder_candidate(payload.text, timezone_name=payload.timezone)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/reminders")
 async def list_reminders(auth: AuthContext = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
     rows = await reminder_service.list_owned(session, uuid.UUID(auth.tenant_id), uuid.UUID(auth.user_id))
@@ -247,7 +277,22 @@ async def update_reminder(reminder_id: uuid.UUID, payload: ReminderPatch, auth: 
 async def create_handoff(payload: HandoffRequest, auth: AuthContext = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
     if not await conversation_service.conversation_belongs_to_user(session, uuid.UUID(auth.tenant_id), payload.conversation_id, uuid.UUID(auth.user_id)):
         raise ForbiddenError("会话不存在或不属于当前用户")
-    row = await handoff_service.create_handoff(session, tenant_id=uuid.UUID(auth.tenant_id), user_id=uuid.UUID(auth.user_id), conversation_id=payload.conversation_id, summary=payload.summary, reason=payload.reason, context={"attempted_actions": payload.attempted_actions})
+    source_text = payload.message or payload.summary or "用户请求人工协助"
+    package = await build_handoff_context(
+        session,
+        {
+            "tenant_id": auth.tenant_id,
+            "conversation_id": str(payload.conversation_id),
+        },
+        source_text,
+        reason=payload.reason,
+        context_store=conversation_context,
+        tenant_llm=llm_for_tenant(auth.tenant_id),
+    )
+    attempted = list(dict.fromkeys(
+        [*package["context"].get("attempted_actions", []), *payload.attempted_actions]
+    ))
+    row = await handoff_service.create_handoff(session, tenant_id=uuid.UUID(auth.tenant_id), user_id=uuid.UUID(auth.user_id), conversation_id=payload.conversation_id, summary=package["summary"], reason=payload.reason, context={**package["context"], "attempted_actions": attempted})
     if payload.message:
         await handoff_service.add_customer_message(session, handoff=row, content=payload.message)
     return handoff_service.serialize(row)
