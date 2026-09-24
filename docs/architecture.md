@@ -52,7 +52,7 @@ assistant_service -> LLM（历史正序 + 当前 user message）
 
 - 入站 subject `im.inbound`，出站 `im.outbound`，提醒 `reminder.due`，重试 `tool.retry`，死信 `deadletter.*`。
 - 使用 JetStream stream + durable consumer + 显式 ACK/NAK + 最大投递次数（max deliver）+ 指数退避重试。
-- 至少一次投递；消费端以业务幂等键（如 `tenant_id + message_id`、`reminder occurrence id`）保证恰好一次业务效果。
+- 至少一次投递；outbox 发布时用 `event_id` 作为 JetStream `Nats-Msg-Id` 压缩崩溃窗口的重复事件，消费端再以业务幂等键（如 `tenant_id + message_id`、`reminder occurrence id`）保证恰好一次业务效果。
 - 仅重试可恢复错误，指数退避 + 抖动，超过最大投递次数后进入死信 subject 并计数指标。禁止无限重试。
 
 ## 3. WebSocket 事件格式（冻结）
@@ -79,7 +79,7 @@ assistant_service -> LLM（历史正序 + 当前 user message）
 
 ## 6. 提醒调度与时间解析
 
-- 时区：原始时区默认 `Asia/Shanghai`，数据库统一存 UTC。
+- 时区：原始时区默认 `Asia/Shanghai`，数据库统一存 UTC；重复规则先在租户 IANA 时区的本地墙钟上推进，再转回 UTC，避免 DST 漂移和 UTC 跨日误判。
 - 调度器扫描 `next_run_at <= now` 的到期提醒，以行锁/租约抢占，支持多实例。
 - 每条提醒的每次 occurrence 单独幂等（`reminder_deliveries` 表），避免重启或并发重复推送。
 - 当前 API 接受明确的本地 ISO 时间 + IANA 时区；自然语言时间若不唯一则要求用户澄清，不做猜测。
@@ -123,7 +123,7 @@ ACK 路径不等待 LLM 或下游工具（FR1-03 / NFR1-02）。
 - 查询实体抽取与文档实体抽取使用同一套“LLM 优先、确定性规则失败开放”策略；抽取失败只降低召回增强能力，不会中断问答。
 - 语义证据选择最多读取 `RAG_SEMANTIC_CANDIDATE_LIMIT` 个当前租户公开、已审核、有效分块，只接受候选中已有的 `chunk_id`；空结果和模型异常均保持拒答。
 - DeepSeek 的结构化索引、查询改写和证据选择显式关闭 thinking，避免推理 token 挤占短 JSON 输出；最终客服话术仍使用常规模型配置。
-- 所有真实 LLM 调用共用 Redis 准入门：最多 600 个已发出的在途请求，滚动 1 秒最多启动 20 个。超额请求在应用内等待，不会提前向 DeepSeek 建立 TCP 连接；在途槽位带租约，避免进程异常后永久占用。
+- 所有真实 LLM 调用共用 Redis 准入门：最多 600 个已发出的在途请求，滚动 1 秒最多启动 20 个。超额请求在应用内等待，不会提前向 DeepSeek 建立 TCP 连接；在途槽位带租约。Redis 不可用时回退到进程内有界准入，保留单实例的并发/速率保护，但不宣称跨实例全局上限。
 - 每次 LLM 调用将 prompt/completion token 与会话、租户关联入库；租户管理端只能汇总本租户会话的用量与按环境单价计算的成本。
 - 客户建议问题来自同一租户分块的 `suggested_questions`，不使用跨租户或前端写死的问题模板。
 - `unknown` 表示“未命中业务路由”，不再表示“立即拒答”；只有明确人工请求才创建 handoff。
@@ -133,6 +133,6 @@ ACK 路径不等待 LLM 或下游工具（FR1-03 / NFR1-02）。
 
 - **LLM 无执行权限**：LLM 只理解或生成建议；写操作与敏感数据用确定性代码完成鉴权、校验、幂等、审计（§2.4）。
 - **安全意图路由**：高确定性规则优先，未知输入 abstain；LLM 仅生成无副作用闲聊或基于已检索证据的话术，不拥有工具权限。知识引用由服务端拼接，LLM 失败时回退至抽取式证据答案。
-- **脱敏前置**：财务数据在进入 LLM 前完成脱敏（FR6-06）。
+- **脱敏前置**：所有外部 LLM 请求在 HTTP provider 边界统一扫描邮箱、手机、银行卡和身份证；财务结果在此前仍先进行递归字段脱敏（FR6-06）。
 - **一份镜像多入口**：Compose 只构建 `education-ai-service-app:latest` 一次，api/worker/scheduler/mocks 用不同 command 复用该镜像。
 - **显式演示边界**：`demo-bootstrap` 幂等运行迁移、固定身份与示例知识导入；可写租户工作台与只读客户样例使用不同 `tenant_id`，客户 JWT 只能检索固定样例库。一键客户会话只在 `DEMO_MODE=true` 时存在，非演示环境必须关闭。

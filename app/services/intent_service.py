@@ -27,6 +27,11 @@ def classify_intent(text: str) -> IntentResult:
         term in normalized for term in ("转人工", "人工客服", "真人客服", "真人处理", "客服人员")
     ):
         return IntentResult(intent="human_handoff", confidence=1, source="rule")
+    if any(
+        term in normalized
+        for term in ("请假规则", "请假政策", "缺课", "补课规则", "考勤")
+    ):
+        return IntentResult(intent="attendance_policy", confidence=0.96, source="rule")
     if any(term in normalized for term in ("退费政策", "退款政策", "课程政策", "服务协议", "faq", "常见问题", "补课", "转班", "试听", "老带新", "隐私", "线上", "线下", "开课后", "一节课", "多长时间")):
         return IntentResult(intent="knowledge_qa", confidence=0.96, source="rule")
     if any(term in normalized for term in ("发票", "账单", "余额", "订单", "退费进度", "退款进度", "到账")):

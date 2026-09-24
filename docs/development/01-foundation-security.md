@@ -53,7 +53,7 @@ tests/integration/test_{auth,isolation}.py
 - 密码只存带随机 salt 的强哈希；错误格式验证返回失败而非抛出内部异常。
 - JWT claim 固定为 `sub/tenant_id/role/exp`，算法只接受配置中的 allowlist 值。
 - token 缺字段、过期、签名错误、非法角色均映射 401。
-- `JWT_SECRET=dev_secret_change_me` 只能用于本地；非 development 环境启动时应拒绝弱默认值或记录明确阻断。
+- `JWT_SECRET=dev_secret_change_me` 只能用于本地；非 development/demo/test 环境使用空值或弱默认值时必须 fail-fast，且禁止 `DEMO_MODE=true`。JWT 验证必须要求 `exp` claim 存在。
 
 ### 4.3 FastAPI 认证与 RBAC
 
@@ -81,7 +81,7 @@ list_audit_logs(tenant_id, ...)
 
 - 使用 literal 期望测试边界长度、非匹配文本和嵌套 dict/list；
 - `token/password/secret/authorization` 等键直接替换；
-- 日志 formatter、审计 detail 和发送给 LLM 的财务 payload 使用同一能力；
+- 日志 formatter、审计 detail 和所有外部 LLM provider 请求使用同一脱敏能力；
 - 不把原值放在异常消息中。
 
 ### 4.6 审计

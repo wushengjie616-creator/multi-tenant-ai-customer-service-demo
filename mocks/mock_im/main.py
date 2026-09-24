@@ -62,6 +62,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="mock-im", lifespan=lifespan)
 
 
+async def forward_inbound(payload: dict, token: str, *, client_factory=httpx.AsyncClient):
+    """Forward a mock customer message through the same authenticated API boundary."""
+    async with client_factory(timeout=10.0) as client:
+        await client.post(
+            API_WEBHOOK_URL,
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "mock-im"}
@@ -75,6 +85,10 @@ async def pushes():
 @app.websocket("/ws")
 async def ws(ws: WebSocket):
     conversation_id = ws.query_params.get("conversation_id") or "default"
+    token = ws.query_params.get("token") or ""
+    if not token:
+        await ws.close(code=1008, reason="missing customer token")
+        return
     await ws.accept()
     _connections[conversation_id].add(ws)
     try:
@@ -82,8 +96,7 @@ async def ws(ws: WebSocket):
             raw = await ws.receive_text()
             data = json.loads(raw)
             payload = data.get("payload", data)
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.post(API_WEBHOOK_URL, json=payload)
+            await forward_inbound(payload, token)
             await ws.send_json(
                 {"type": "message.accepted", "message_id": payload.get("message_id")}
             )

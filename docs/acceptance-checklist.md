@@ -21,7 +21,7 @@
 
 | 要求 | 状态 | 主要实现/证据 |
 | --- | --- | --- |
-| ACK、去重、幂等、断线重连、多端同步、流式回复 | 通过 | `messages.py`、`websocket.py`、E2E WebSocket 断线补发与 chunk 重组 |
+| ACK、去重、幂等、断线重连、多端同步、分片事件 | 通过 | `messages.py`、`websocket.py`、E2E WebSocket 断线补发与 chunk 重组；LLM 原生 token streaming 尚未接入 |
 | 短期记忆与历史摘要 | 通过 | Redis 最近 20 条 + PostgreSQL 全量历史，窗口外消息生成持久化确定性摘要并在后续 LLM 轮次注入 |
 | 多租户隔离 | 通过 | JWT 中 tenant_id、所有资源 tenant 过滤、Qdrant tenant filter、越权反例测试 |
 | 意图识别与混合路由 | 通过 | 安全业务意图规则优先，未匹配再做 RAG/实体检索，不把所有输入盲目交给 LLM |
@@ -34,15 +34,15 @@
 | 全局 LLM 并发保护 | 加分实现 | Redis 全局准入：600 在途、20 starts/s，超额不建立 DeepSeek TCP 连接 |
 | 日志、Prometheus、trace、审计 | 通过 | JSON 日志、`/metrics`、OpenTelemetry Collector、traceparent 跨 NATS |
 | token 与成本按租户统计 | 通过 | `llm_usages` 迁移与租户工作台会话成本面板 |
-| Docker Compose / Mock / 迁移 / 健康检查 | 通过 | `make up`、5 个 Mock、Alembic 0001–0008、live/ready |
+| Docker Compose / Mock / 迁移 / 健康检查 | 通过 | `make up`、5 个 Mock、Alembic 0001–0011、live/ready |
 | 测试、压测、故障注入、LLM 评测 | 通过/规模边界已标注 | `make test`、Locust CSV、fault matrix、50 条 dataset |
 
 ## 不应夸大的边界
 
-1. 本机报告是面试规模，没有在固定 8C16G 环境执行 500 WebSocket、200 msg/s 持续 5 分钟、1000 msg/s 突发 30 秒；因此不宣称达到生产容量。
+1. 本机 2C4G 已执行 500 WebSocket、200 msg/s 持续 5 分钟和 1000 msg/s 突发 30 秒：500 WS 通过，200 msg/s 入口通过但消费未追平，1000 msg/s 未达标；因此不宣称达到生产容量。
 2. WebSocket 会输出 `reply.start/chunk/end`，但当前 LLM HTTP 边界是完整回复后分块下发，不把它宣称为供应商原生 token streaming。
 3. 长会话摘要采用确定性压缩，不会为了摘要再消耗一次 LLM；生产上如需更高语义质量，可在异步低优先级队列中替换为模型摘要。
-4. Redis 故障时 LLM 全局准入会 fail-open 以保证可用性；生产发布前应根据供应商限额决定改为 fail-closed 或本地备用 semaphore。
+4. Redis 故障时 LLM 全局准入使用进程内有界 semaphore 和速率窗口作为备用；它能避免完全 fail-open，但多实例故障期间无法提供严格的全局配额一致性。
 
 ## 一键验收
 

@@ -60,7 +60,12 @@ def create_access_token(
 def decode_token(token: str) -> AuthContext:
     """校验 token 并提取身份；任何失败（签名/过期/缺 claim/非法角色）抛 AuthError。"""
     try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[settings.jwt_algorithm],
+            options={"require_exp": True},
+        )
     except JWTError as exc:
         raise AuthError("invalid or expired token") from exc
 

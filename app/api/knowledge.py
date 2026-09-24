@@ -48,8 +48,7 @@ async def list_suggestions(auth: AuthContext = Depends(get_current_user)):
     }
 
 
-@router.post("/documents")
-async def import_document(payload: DocumentRequest, auth: AuthContext = Depends(require_roles(ROLE_ADMIN))):
+async def _replace_document(payload: DocumentRequest, tenant_id: str) -> dict:
     if len(payload.content) > settings.demo_max_upload_chars:
         raise AppError(
             f"文档内容超过 {settings.demo_max_upload_chars} 字符限制",
@@ -57,12 +56,12 @@ async def import_document(payload: DocumentRequest, auth: AuthContext = Depends(
             status_code=413,
         )
     chunks = await build_enriched_document_chunks(
-        tenant_id=auth.tenant_id,
+        tenant_id=tenant_id,
         llm=llm_client,
         **payload.model_dump(),
     )
-    await vector_store.delete_document(auth.tenant_id, payload.document_id)
-    await vector_store.upsert_chunks(auth.tenant_id, chunks)
+    await vector_store.delete_document(tenant_id, payload.document_id)
+    await vector_store.upsert_chunks(tenant_id, chunks)
     enrichment: dict[str, int] = {}
     for chunk in chunks:
         status = chunk["payload"]["enrichment_status"]
@@ -73,6 +72,17 @@ async def import_document(payload: DocumentRequest, auth: AuthContext = Depends(
         "content_hash": chunks[0]["payload"]["content_hash"],
         "enrichment": enrichment,
     }
+
+
+@router.post("/documents")
+async def import_document(payload: DocumentRequest, auth: AuthContext = Depends(require_roles(ROLE_ADMIN))):
+    return await _replace_document(payload, auth.tenant_id)
+
+
+@router.post("/reindex")
+async def reindex_document(payload: DocumentRequest, auth: AuthContext = Depends(require_roles(ROLE_ADMIN))):
+    """Explicitly replace every indexed chunk for a tenant-owned document."""
+    return await _replace_document(payload, auth.tenant_id)
 
 
 @router.post("/query")

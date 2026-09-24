@@ -37,3 +37,8 @@ class UnauthorizedError(AppError):
 class DependencyError(AppError):
     def __init__(self, message: str = "依赖服务不可用", **kwargs):
         super().__init__(message, code="DEPENDENCY_UNAVAILABLE", status_code=503, **kwargs)
+
+
+class ConflictError(AppError):
+    def __init__(self, message: str = "请求与已有状态冲突", *, code: str = "CONFLICT", **kwargs):
+        super().__init__(message, code=code, status_code=409, **kwargs)

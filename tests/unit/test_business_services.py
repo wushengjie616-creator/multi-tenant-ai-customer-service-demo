@@ -6,10 +6,11 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.clients.knowledge_client import is_payload_active
+from app.services import finance_service, handoff_service
 from app.services.finance_service import safe_finance_result
 from app.services.handoff_service import should_handoff
 from app.services.rag_service import answer_question, build_grounded_answer, deterministic_embedding
-from app.services.reminder_service import advance_occurrence, compute_next_run
+from app.services.reminder_service import advance_occurrence, advance_to_future, compute_next_run
 
 
 def test_rag_requires_supported_evidence_and_validates_citations():
@@ -234,12 +235,32 @@ def test_finance_masks_before_return_and_never_invents_on_failure():
     assert "amount" not in failed
 
 
+def test_finance_success_is_rendered_as_customer_language_not_raw_json():
+    result = safe_finance_result(
+        {"order_id": "EDU-1", "amount": 2399, "status": "issued", "email": "parent@example.com"}
+    )
+    reply = finance_service.format_finance_reply("invoice", result)
+    assert "EDU-1" in reply
+    assert "¥2,399" in reply
+    assert "p***@example.com" in reply
+    assert not reply.startswith("{")
+
+
 @pytest.mark.parametrize(
     ("explicit", "count", "expected"),
     [(True, 0, True), (False, 1, False), (False, 2, True)],
 )
 def test_handoff_trigger(explicit, count, expected):
     assert should_handoff(explicit_request=explicit, dissatisfaction_count=count) is expected
+
+
+@pytest.mark.parametrize("text", ["还是不对", "你这回答没用", "答非所问"])
+def test_negative_feedback_is_recognized(text):
+    assert handoff_service.is_dissatisfaction(text)
+
+
+def test_regular_question_is_not_negative_feedback():
+    assert not handoff_service.is_dissatisfaction("你们有哪些课程？")
 
 
 def test_once_reminder_is_normalized_to_utc_and_rejects_past():
@@ -251,6 +272,14 @@ def test_once_reminder_is_normalized_to_utc_and_rejects_past():
         now=now,
     )
     assert result.isoformat() == "2026-09-24T01:00:00+00:00"
+    early = compute_next_run(
+        run_at_local="2026-09-24T09:00:00",
+        timezone_name="Asia/Shanghai",
+        repeat="once",
+        lead_time_minutes=30,
+        now=now,
+    )
+    assert early.isoformat() == "2026-09-24T00:30:00+00:00"
     with pytest.raises(ValueError):
         compute_next_run(
             run_at_local="2026-09-22T09:00:00",
@@ -266,3 +295,27 @@ def test_repeating_reminder_advances_and_skips_weekend():
     assert advance_occurrence(friday, "weekly") == datetime(2026, 10, 2, 1, 0, tzinfo=timezone.utc)
     assert advance_occurrence(friday, "weekdays") == datetime(2026, 9, 28, 1, 0, tzinfo=timezone.utc)
     assert advance_occurrence(friday, "once") is None
+
+
+def test_weekday_reminder_uses_tenant_local_calendar_near_utc_date_boundary():
+    # 2026-09-24 17:00 UTC is Friday 01:00 in Shanghai. The next weekday is
+    # Monday 01:00 local, not Saturday 01:00 local.
+    friday_local = datetime(2026, 9, 24, 17, 0, tzinfo=timezone.utc)
+    assert advance_occurrence(
+        friday_local, "weekdays", timezone_name="Asia/Shanghai"
+    ) == datetime(2026, 9, 27, 17, 0, tzinfo=timezone.utc)
+
+
+def test_daily_reminder_preserves_wall_clock_across_dst_change():
+    # New York switches from EDT to EST on 2026-11-01. 09:00 local therefore
+    # moves from 13:00 UTC to 14:00 UTC while preserving the user's wall time.
+    before_dst_end = datetime(2026, 10, 31, 13, 0, tzinfo=timezone.utc)
+    assert advance_occurrence(
+        before_dst_end, "daily", timezone_name="America/New_York"
+    ) == datetime(2026, 11, 1, 14, 0, tzinfo=timezone.utc)
+
+
+def test_repeating_reminder_skips_stale_occurrences_after_worker_downtime():
+    stale = datetime(2026, 9, 22, 1, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
+    assert advance_to_future(stale, "daily", now) == datetime(2026, 9, 26, 1, 0, tzinfo=timezone.utc)

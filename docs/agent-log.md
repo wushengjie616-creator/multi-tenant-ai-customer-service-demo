@@ -27,9 +27,9 @@ mock-llm -> JetStream im.outbound -> mock-im/WS 推送` 最小闭环。
 - `conversation_service.ingest_message`/`save_reply` 改为 outbox 同事务写入；
   `app/main.py`、`app/workers/message_worker.py` 启动 relay loop。
 
-**与 PLAN.md 的偏差**：PLAN.md §1.2 仍写「RabbitMQ + Qdrant」，属 stale。实际代码与冻结的
-`docs/architecture.md` §1/§2 采用 **NATS JetStream**（pgvector 复用 PG，不引入独立向量库）。
-按架构冻结文档为准，PLAN.md 未回改。
+**历史说明**：本阶段早期文档曾在 RabbitMQ/Qdrant、NATS/pgvector 之间存在不一致；随后已经
+统一为当前实现的 **NATS JetStream + Qdrant**。该段保留过程背景，当前状态以
+`docs/architecture.md`、Compose 和代码为准。
 
 **验证**：`make up` 后 `make migrate` + `make demo`（seed → 发送 → 幂等 → 轮询回复）。
 本机（无 Docker / Python 3.12）未实跑，需在 Docker 环境验证。
@@ -71,7 +71,13 @@ mock-llm -> JetStream im.outbound -> mock-im/WS 推送` 最小闭环。
 ### Agent 主要生成/修改范围
 
 - FastAPI API、worker/scheduler、NATS outbox、Redis 上下文/限流/LLM 准入、Qdrant RAG、Mock 服务。
-- Alembic 0001–0008、单元/集成/E2E/Locust/故障脚本和 50 条评测。
+- Alembic 0001–0011、单元/集成/E2E/Locust/故障脚本和 50 条评测。
+
+### 2026-09-24 正式验收更新
+
+- 当前工作树重新执行 `make acceptance`：220 个单元/集成测试通过，覆盖率 76.14%；10 个 E2E 通过；50 条路由与 5 条 RAG 探针通过；四项依赖健康。
+- 正式目标压测已执行：500 WS 与 100 QPS 财务通过；200 msg/s 入口通过但消费者未追平；1000 msg/s 未达标。结果与边界写入 `report/正式验收报告.md`。
+- 高并发消费、WebSocket 多实例广播和 Prometheus 完整指标已形成设计文档，本轮未修改实现。
 - 平台管理员、租户工作台和客户演示界面，以及 README、架构、API、压测和演示文档。
 
 ### 人工审查后纠正的代表性问题
@@ -89,4 +95,4 @@ mock-llm -> JetStream im.outbound -> mock-im/WS 推送` 最小闭环。
 - 不采用“LLM 输出 JSON 就直接调平台”；改用确定性 allowlist + Pydantic Schema + RBAC + ownership + confirmation。
 - 不采用“RAG 无证据也让模型自由回答”；服务端 evidence gate 负责拒答与引用。
 - 不采用“每个 worker 各自 20 并发”；改为 Redis 全局共享的 600 在途 + 20 starts/s。
-- 不把 Locust smoke 成绩写成生产容量承诺；未跑的 500 WS / 200 msg/s / 1000 msg/s 保留在已知边界。
+- 不把早期 Locust smoke 成绩写成生产容量承诺；后续已执行 500 WS / 200 msg/s / 1000 msg/s 正式目标场景，并将未达项如实写入正式验收报告。

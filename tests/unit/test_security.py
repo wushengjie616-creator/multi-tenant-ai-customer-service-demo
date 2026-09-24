@@ -2,8 +2,9 @@
 
 import pytest
 from jose import jwt
+from pydantic import ValidationError
 
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.core.security import (
     ROLES,
     ROLE_ADMIN,
@@ -48,6 +49,33 @@ def test_decode_rejects_missing_claims():
     token = jwt.encode({"sub": "u-1"}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
     with pytest.raises(AuthError):
         decode_token(token)
+
+
+def test_decode_rejects_identity_token_without_expiry():
+    token = jwt.encode(
+        {"sub": "u-1", "tenant_id": "t-1", "role": "user"},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+    with pytest.raises(AuthError):
+        decode_token(token)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"app_env": "production", "jwt_secret": "dev_secret_change_me", "demo_mode": False},
+        {"app_env": "production", "jwt_secret": "a-secure-production-secret", "demo_mode": True},
+    ],
+)
+def test_production_rejects_unsafe_security_configuration(overrides):
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **overrides)
+
+
+def test_demo_mode_is_disabled_by_default_when_no_env_file_is_loaded(monkeypatch):
+    monkeypatch.delenv("DEMO_MODE", raising=False)
+    assert Settings(_env_file=None).demo_mode is False
 
 
 def test_decode_rejects_invalid_role():

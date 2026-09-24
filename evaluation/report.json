@@ -7,45 +7,9 @@
   "failed": [],
   "rag": {
     "samples": 5,
-    "factual_accuracy": 0.0,
-    "citation_hit_rate": 0.0,
+    "factual_accuracy": 1.0,
+    "citation_hit_rate": 1.0,
     "style_compliance_rate": 1.0,
-    "failed": [
-      {
-        "query": "你们有哪些班？",
-        "factual": false,
-        "cited": false,
-        "style": true,
-        "citations": []
-      },
-      {
-        "query": "数学 A3 什么时候上课？",
-        "factual": false,
-        "cited": false,
-        "style": true,
-        "citations": []
-      },
-      {
-        "query": "如何请假和补课？",
-        "factual": false,
-        "cited": false,
-        "style": true,
-        "citations": []
-      },
-      {
-        "query": "退费多久到账？",
-        "factual": false,
-        "cited": false,
-        "style": true,
-        "citations": []
-      },
-      {
-        "query": "有什么活动和优惠？",
-        "factual": false,
-        "cited": false,
-        "style": true,
-        "citations": []
-      }
-    ]
+    "failed": []
   }
 }

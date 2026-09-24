@@ -8,6 +8,7 @@ from app.core.redis import redis_client
 from app.core.circuit_breaker import AsyncCircuitBreaker
 from app.services.llm_gate import LLMRequestGate
 from app.services import llm_usage_context
+from app.utils.masking import mask_pii
 
 
 def extract_reply(data: dict) -> str:
@@ -50,11 +51,19 @@ class LLMClient:
         stream: bool = False,
         thinking: bool | None = None,
     ) -> str:
+        safe_messages = [
+            {
+                **message,
+                "content": mask_pii(message.get("content", "")),
+            }
+            for message in messages
+        ]
+
         async def request():
             async with asyncio.timeout(self.timeout):
                 payload = {
                     "model": self.model,
-                    "messages": messages,
+                    "messages": safe_messages,
                     "stream": stream,
                     "temperature": self.temperature,
                     "max_tokens": self.max_tokens,
@@ -72,7 +81,7 @@ class LLMClient:
                 data = resp.json()
                 reply = extract_reply(data)
                 usage = data.get("usage") or {}
-                prompt_tokens = int(usage.get("prompt_tokens") or max(1, sum(len(item.get("content", "")) for item in messages) // 4))
+                prompt_tokens = int(usage.get("prompt_tokens") or max(1, sum(len(item.get("content", "")) for item in safe_messages) // 4))
                 completion_tokens = int(usage.get("completion_tokens") or max(1, len(reply) // 4))
                 llm_usage_context.add({"model": self.model, "prompt_tokens": prompt_tokens,
                                        "completion_tokens": completion_tokens})

@@ -86,6 +86,8 @@ parameters, risk_level, abstain_reason, model_version
 5. 在任何 LLM/话术处理前递归脱敏；
 6. 成功/超时/500/空响应写审计和确定性结果。
 
+HTTP 财务中心与 AI 聊天均走审计边界；聊天成功结果先脱敏，再由确定性模板转为客服话术，不输出原始 JSON。
+
 下游失败只能返回“暂时查不到及下一步”，不得出现模型生成的金额、订单状态或退费进度。
 
 ### 4.2 Mock finance
@@ -98,14 +100,15 @@ parameters, risk_level, abstain_reason, model_version
 
 ### 5.1 幂等与重试
 
-- 业务幂等键由 tenant、user、action、resource、规范化 args/confirmation 派生并唯一存储。
+- 客户端幂等键先绑定 tenant、user 和 action；服务端另存规范化 resource + args 的 `request_hash`。同 key + 同 payload 返回原结果，同 key + 不同 payload 返回 `409 IDEMPOTENCY_CONFLICT`。
 - 相同确认或消息重投返回既有 `tool_execution`，不再调用 mock-platform。
 - 仅网络超时、连接错误和约定的 5xx 可重试；4xx、Schema、权限、归属失败不可重试。
 - 重试使用有上限的指数退避加抖动；测试中注入 clock/sleeper，不能真的等待长时间。
+- 平台写指令最多尝试 3 次，429/5xx/连接或超时才重试，每次复用同一幂等键。
 
 ### 5.2 Mock platform
 
-按工具保存调用记录和最终资源状态，支持相同幂等键返回同一结果；支持 delay、可重试 500、不可重试 400。测试必须能查询调用次数来证明确认前为 0、确认后为 1。
+按工具保存调用记录和最终资源状态，自动续费状态按 `(tenant_id,user_id)` 隔离，支持相同幂等键返回同一结果；支持 delay、可重试 500、不可重试 400。测试必须能查询调用次数来证明确认前为 0、确认后为 1。
 
 ## 6. 测试清单
 

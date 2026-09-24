@@ -1,0 +1,130 @@
+{
+  "memory": 0,
+  "storage": 68186889,
+  "reserved_memory": 0,
+  "reserved_storage": 0,
+  "accounts": 1,
+  "ha_assets": 0,
+  "api": {
+    "level": 5,
+    "total": 229,
+    "errors": 0
+  },
+  "server_id": "NAM7ZNZCHWDPB77XJHSFIBIEP5OF5R7PHGTIQFFOABN67WNFTCPYSCMC",
+  "now": "2026-09-24T08:48:39.904983586Z",
+  "config": {
+    "max_memory": 3070841856,
+    "max_storage": 22728391647,
+    "store_dir": "/tmp/nats/jetstream",
+    "sync_interval": 120000000000,
+    "strict": true
+  },
+  "limits": {
+    "default_max_consumers": 1000
+  },
+  "streams": 1,
+  "consumers": 3,
+  "messages": 100451,
+  "bytes": 68186889,
+  "account_details": [
+    {
+      "name": "$G",
+      "id": "$G",
+      "memory": 0,
+      "storage": 68186889,
+      "reserved_memory": 18446744073709551615,
+      "reserved_storage": 18446744073709551615,
+      "accounts": 0,
+      "ha_assets": 0,
+      "api": {
+        "level": 0,
+        "total": 229,
+        "errors": 0
+      },
+      "stream_detail": [
+        {
+          "name": "EVENTS",
+          "created": "2026-09-23T06:46:32.263966355Z",
+          "cluster": {
+            "leader": "NAM7ZNZCHWDPB77XJHSFIBIEP5OF5R7PHGTIQFFOABN67WNFTCPYSCMC"
+          },
+          "state": {
+            "messages": 100451,
+            "bytes": 68186889,
+            "first_seq": 1,
+            "first_ts": "2026-09-23T08:32:55.393238908Z",
+            "last_seq": 100451,
+            "last_ts": "2026-09-24T08:47:32.581148012Z",
+            "num_subjects": 2,
+            "consumer_count": 3
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "EVENTS",
+              "name": "im-inbound-worker",
+              "created": "2026-09-23T06:46:32.29091673Z",
+              "delivered": {
+                "consumer_seq": 25958,
+                "stream_seq": 19580,
+                "last_active": "2026-09-24T08:47:32.588062262Z"
+              },
+              "ack_floor": {
+                "consumer_seq": 23955,
+                "stream_seq": 18480,
+                "last_active": "2026-09-24T08:47:32.525405095Z"
+              },
+              "num_ack_pending": 1000,
+              "num_redelivered": 419,
+              "num_waiting": 0,
+              "num_pending": 71036,
+              "ts": "2026-09-24T08:48:39.905010461Z"
+            },
+            {
+              "stream_name": "EVENTS",
+              "name": "im-outbound-api",
+              "created": "2026-09-23T06:46:35.971560815Z",
+              "delivered": {
+                "consumer_seq": 14245,
+                "stream_seq": 100451,
+                "last_active": "2026-09-24T08:47:32.581207012Z"
+              },
+              "ack_floor": {
+                "consumer_seq": 14245,
+                "stream_seq": 100451,
+                "last_active": "2026-09-24T08:47:32.582240137Z"
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-09-24T08:48:39.905012294Z"
+            },
+            {
+              "stream_name": "EVENTS",
+              "name": "im-outbound-mockim",
+              "created": "2026-09-23T06:46:33.274709772Z",
+              "delivered": {
+                "consumer_seq": 14245,
+                "stream_seq": 100451,
+                "last_active": "2026-09-24T08:47:32.581186804Z"
+              },
+              "ack_floor": {
+                "consumer_seq": 14245,
+                "stream_seq": 100451,
+                "last_active": "2026-09-24T08:47:32.581430054Z"
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-09-24T08:48:39.905013044Z"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "total": 1
+}

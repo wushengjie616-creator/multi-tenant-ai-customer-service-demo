@@ -27,18 +27,21 @@
 | `GET /knowledge/documents` | admin | 列出当前租户知识文档、标题、前三个非空行和全文 |
 | `GET /knowledge/suggestions` | authenticated | 返回当前租户知识分块生成的去重建议问题，默认最多 8 条 |
 | `POST /knowledge/documents` | admin | 按 Markdown 块导入/替换知识文档，支持版本与有效期元数据 |
+| `POST /knowledge/reindex` | admin | 删除当前租户的旧文档分片后显式重建索引 |
 | `POST /knowledge/query` | authenticated | 有证据回答并返回服务端校验引用 |
 | `GET /finance/{invoice|order|bill|refund|balance}` | owner/authorized | 财务查询，返回前递归脱敏 |
 | `POST /commands/close-auto-renew` | user | 创建 5 分钟确认请求，不执行副作用 |
 | `POST /commands/confirm/{id}` | same user | 原子确认并幂等执行一次 |
 | `GET /platform/{course-schedule|study-report}` | authenticated | 按 token 身份查询课程表/学习报告 |
-| `POST /commands/{submit-leave|update-course-reminder}` | conversation owner | 低风险平台写操作，要求客户端幂等键 |
-| `POST/GET /reminders` | user | 创建/查询自己的提醒 |
+| `POST /commands/{submit-leave|update-course-reminder}` | conversation owner | 低风险平台写操作，要求客户端幂等键；同 key 更换资源/参数返回 `409 IDEMPOTENCY_CONFLICT` |
+| `POST/GET /reminders` | user | 创建/查询自己的提醒；`lead_time_minutes` 控制提前通知 |
 | `PATCH/DELETE /reminders/{id}` | owner | 乐观版本修改/取消 |
 | `POST /handoffs` | conversation owner | 幂等创建人工转接并投递上下文包；可携带 `message` 保存不触发 AI 的离线留言 |
 | `GET /admin/handoffs` | admin | 查看当前租户的人工会话队列 |
 | `POST /admin/handoffs/{id}/reply` | admin | 向当前租户人工会话发送坐席回复；跨租户请求返回 403 |
 | `POST /admin/users` | admin | 在当前 JWT 租户中新建管理员，返回一次性展示的租户 ID、邮箱和初始密码 |
+
+Mock IM 入站 WebSocket 使用 `/ws?conversation_id=<id>&token=<customer-jwt>`；Mock 会将该 token 作为 Bearer 凭据转发到真实 webhook，缺 token 时以 `1008` 拒绝连接。该 query token 仅用于本地 Mock，生产 IM 集成应使用平台签名而非 URL token。
 | `GET /admin/llm-usage` | admin | 按当前租户、会话聚合 LLM 调用次数、token 与配置单价成本 |
 | `GET /admin/dead-letters` | admin | 查看当前租户脱敏死信原因 |
 | `POST /admin/dead-letters/{id}/replay` | admin | 从原始消息重建事件并幂等重放 |

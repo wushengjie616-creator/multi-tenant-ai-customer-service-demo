@@ -66,3 +66,29 @@ async def test_llm_client_can_disable_thinking_for_structured_json_tasks():
 
     assert reply == '{"ok":true}'
     assert observed["thinking"] == {"type": "disabled"}
+
+
+async def test_llm_client_masks_pii_at_the_provider_boundary():
+    observed = {}
+
+    async def handler(request: httpx.Request):
+        observed.update(__import__("json").loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "ok"}}]},
+        )
+
+    http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client = LLMClient(client=http_client)
+    try:
+        await client.generate(
+            [{"role": "user", "content": "联系 13812345678 或 parent@example.com"}]
+        )
+    finally:
+        await client.close()
+
+    sent = observed["messages"][0]["content"]
+    assert "13812345678" not in sent
+    assert "parent@example.com" not in sent
+    assert "138****5678" in sent
+    assert "p***@example.com" in sent

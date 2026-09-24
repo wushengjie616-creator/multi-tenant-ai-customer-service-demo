@@ -1,17 +1,46 @@
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_trace_id
-from app.models import Handoff, Message, OutboxEvent
+from app.models import Conversation, Handoff, Message, OutboxEvent
 from app.schemas.event import EventEnvelope, EventType
 from app.utils.masking import mask_value
 
 
 def should_handoff(*, explicit_request: bool, dissatisfaction_count: int) -> bool:
     return explicit_request or dissatisfaction_count >= 2
+
+
+_DISSATISFACTION_PHRASES = (
+    "不满意", "没用", "还是不对", "答非所问", "没有解决", "说了等于没说",
+)
+_SATISFACTION_PHRASES = ("解决了", "明白了", "谢谢", "可以了")
+
+
+def is_dissatisfaction(text: str) -> bool:
+    normalized = "".join(text.lower().split())
+    return any(phrase in normalized for phrase in _DISSATISFACTION_PHRASES)
+
+
+async def record_feedback(session: AsyncSession, conversation_id, text: str) -> int:
+    if is_dissatisfaction(text):
+        count = await session.scalar(
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .values(dissatisfaction_count=Conversation.dissatisfaction_count + 1)
+            .returning(Conversation.dissatisfaction_count)
+        )
+        return int(count or 0)
+    if any(phrase in text for phrase in _SATISFACTION_PHRASES):
+        await session.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .values(dissatisfaction_count=0)
+        )
+    return 0
 
 
 def serialize(row: Handoff) -> dict:
@@ -31,6 +60,9 @@ async def create_handoff(session: AsyncSession, *, tenant_id, user_id, conversat
         return existing
     handoff = Handoff(tenant_id=tenant_id, user_id=user_id, conversation_id=conversation_id, status="pending", summary=mask_value(summary), reason=reason, context=mask_value(context))
     session.add(handoff); await session.flush()
+    conversation = await session.get(Conversation, conversation_id)
+    if conversation is not None:
+        conversation.dissatisfaction_count = 0
     envelope = EventEnvelope(trace_id=get_trace_id() or f"handoff-{handoff.id}", tenant_id=str(tenant_id), type=EventType.IM_OUTBOUND, payload={"message_id": f"handoff-{handoff.id}", "tenant_id": str(tenant_id), "user_id": str(user_id), "conversation_id": str(conversation_id), "content": "已为你发起人工转接。", "handoff_id": str(handoff.id), "handoff_status": handoff.status, "summary": handoff.summary, "context": handoff.context})
     session.add(OutboxEvent(event_id=envelope.event_id, trace_id=envelope.trace_id, tenant_id=tenant_id, subject=EventType.IM_OUTBOUND, payload=envelope.model_dump(mode="json")))
     await session.commit(); await session.refresh(handoff)
@@ -98,6 +130,9 @@ async def accept(session: AsyncSession, *, tenant_id, handoff_id) -> Handoff | N
     handoff.accepted_at = handoff.accepted_at or datetime.now(timezone.utc)
     handoff.close_requested_at = None
     handoff.close_deadline = None
+    conversation = await session.get(Conversation, handoff.conversation_id)
+    if conversation is not None:
+        conversation.dissatisfaction_count = 0
     await session.commit(); await session.refresh(handoff)
     return handoff
 

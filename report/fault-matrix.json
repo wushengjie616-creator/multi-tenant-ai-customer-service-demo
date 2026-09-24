@@ -1,11 +1,11 @@
 {
-  "generated_at": "2026-09-23T22:53:34+0800",
+  "generated_at": "2026-09-24T16:51:12+0800",
   "passed": true,
   "checks": [
     {
       "name": "redis-stop-recover",
       "passed": true,
-      "duration_seconds": 0.435,
+      "duration_seconds": 0.362,
       "evidence": {
         "degraded_ready": [
           503,
@@ -21,7 +21,7 @@
         ],
         "live_status": 200,
         "ack_status": 202,
-        "message_id": "fault-redis-9812007bd363426c85269e9d76e742bf",
+        "message_id": "fault-redis-3fdf1063fd414580867685cb3640ab23",
         "recovered_ready": [
           200,
           {
@@ -40,7 +40,7 @@
     {
       "name": "nats-stop-recover",
       "passed": true,
-      "duration_seconds": 2.395,
+      "duration_seconds": 2.394,
       "evidence": {
         "degraded_ready": [
           503,
@@ -55,7 +55,7 @@
           }
         ],
         "ack_status": 202,
-        "message_id": "fault-nats-a3eb84432f484302b6b482d1b6199696",
+        "message_id": "fault-nats-3d39f3a8e2454e99a36594e56c8ed183",
         "recovered_ready": [
           200,
           {
@@ -74,7 +74,7 @@
     {
       "name": "queue-backlog-recover",
       "passed": true,
-      "duration_seconds": 14.003,
+      "duration_seconds": 14.642,
       "evidence": {
         "accepted": 12,
         "baseline": {

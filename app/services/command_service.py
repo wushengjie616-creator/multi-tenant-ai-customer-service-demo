@@ -10,8 +10,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients.platform_client import platform_client
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.models import Confirmation, ToolExecution
+from app.services import audit_service
 
 
 def _hash(value: dict) -> str:
@@ -60,7 +61,11 @@ async def confirm_and_execute(session: AsyncSession, *, confirmation_id: uuid.UU
             return execution
         raise ForbiddenError("确认请求已使用或已过期")
     execution_key = _hash({"confirmation_id": str(confirmation.id), "args_hash": confirmation.args_hash})
-    execution = ToolExecution(tenant_id=tenant_id, user_id=user_id, action=confirmation.action, resource_id=confirmation.resource_id, idempotency_key=execution_key)
+    execution = ToolExecution(
+        tenant_id=tenant_id, user_id=user_id, action=confirmation.action,
+        resource_id=confirmation.resource_id, idempotency_key=execution_key,
+        request_hash=confirmation.args_hash,
+    )
     prior_execution = await session.scalar(
         select(ToolExecution).where(ToolExecution.idempotency_key == execution_key)
     )
@@ -70,10 +75,24 @@ async def confirm_and_execute(session: AsyncSession, *, confirmation_id: uuid.UU
         return prior_execution
     session.add(execution); await session.commit()
     try:
-        result = await platform_client.execute(confirmation.action, {**confirmation.arguments, "resource_id": confirmation.resource_id}, execution_key)
+        result = await platform_client.execute(
+            confirmation.action,
+            {
+                **confirmation.arguments, "resource_id": confirmation.resource_id,
+                "tenant_id": str(tenant_id), "user_id": str(user_id),
+            },
+            execution_key,
+        )
         execution.status = "succeeded"; execution.result = result; confirmation.status = "succeeded"
     except Exception as exc:
         execution.status = "failed"; execution.result = {"error": type(exc).__name__}; confirmation.status = "failed"
+    await audit_service.record_audit(
+        session, tenant_id=tenant_id, actor_id=user_id,
+        action=f"platform.command.{confirmation.action}",
+        target=f"resource:{confirmation.resource_id}",
+        outcome="success" if execution.status == "succeeded" else "failed",
+        detail={"request_hash": confirmation.args_hash},
+    )
     await session.commit(); await session.refresh(execution)
     return execution
 
@@ -87,12 +106,27 @@ async def execute_idempotent(
         "tenant_id": str(tenant_id), "user_id": str(user_id), "action": action,
         "client_key": client_key,
     })
+    request_hash = _hash({
+        "tenant_id": str(tenant_id), "user_id": str(user_id), "action": action,
+        "resource_id": resource_id, "arguments": arguments,
+    })
     existing = await session.scalar(select(ToolExecution).where(ToolExecution.idempotency_key == key))
     if existing is not None:
+        if existing.request_hash is not None and existing.request_hash != request_hash:
+            await audit_service.record_audit(
+                session, tenant_id=tenant_id, actor_id=user_id,
+                action=f"platform.command.{action}", target=f"resource:{resource_id}",
+                outcome="denied", detail={"reason": "idempotency_key_payload_conflict"},
+            )
+            await session.commit()
+            raise ConflictError(
+                "同一幂等键不能用于不同的请求内容",
+                code="IDEMPOTENCY_CONFLICT",
+            )
         return existing
     execution = ToolExecution(
         tenant_id=tenant_id, user_id=user_id, action=action,
-        resource_id=resource_id, idempotency_key=key,
+        resource_id=resource_id, idempotency_key=key, request_hash=request_hash,
     )
     session.add(execution)
     try:
@@ -101,16 +135,32 @@ async def execute_idempotent(
         await session.rollback()
         concurrent = await session.scalar(select(ToolExecution).where(ToolExecution.idempotency_key == key))
         if concurrent is not None:
+            if concurrent.request_hash is not None and concurrent.request_hash != request_hash:
+                raise ConflictError(
+                    "同一幂等键不能用于不同的请求内容",
+                    code="IDEMPOTENCY_CONFLICT",
+                )
             return concurrent
         raise
     try:
         execution.result = await platform_client.execute(
-            action, {**arguments, "resource_id": resource_id}, key,
+            action,
+            {
+                **arguments, "resource_id": resource_id,
+                "tenant_id": str(tenant_id), "user_id": str(user_id),
+            },
+            key,
         )
         execution.status = "succeeded"
     except Exception as exc:
         execution.status = "failed"
         execution.result = {"error": type(exc).__name__}
+    await audit_service.record_audit(
+        session, tenant_id=tenant_id, actor_id=user_id,
+        action=f"platform.command.{action}", target=f"resource:{resource_id}",
+        outcome="success" if execution.status == "succeeded" else "failed",
+        detail={"request_hash": request_hash},
+    )
     await session.commit()
     await session.refresh(execution)
     return execution

@@ -7,10 +7,14 @@ from app.core import nats as nats_core
 class _FakeJetStream:
     def __init__(self):
         self.kwargs = None
+        self.published = None
 
     async def subscribe(self, subject, **kwargs):
         self.subject = subject
         self.kwargs = kwargs
+
+    async def publish(self, subject, data, **kwargs):
+        self.published = (subject, data, kwargs)
 
 
 async def test_subscribe_uses_explicit_ack_and_bounded_delivery():
@@ -25,6 +29,18 @@ async def test_subscribe_uses_explicit_ack_and_bounded_delivery():
     assert config.ack_wait == 150
     assert config.filter_subject == "im.inbound"
     assert js.kwargs["manual_ack"] is True
+
+
+async def test_publish_can_bind_jetstream_deduplication_to_event_id():
+    js = _FakeJetStream()
+    await nats_core.publish_bytes(
+        js, "im.outbound", b"payload", message_id="event-123"
+    )
+    assert js.published == (
+        "im.outbound",
+        b"payload",
+        {"stream": "EVENTS", "headers": {"Nats-Msg-Id": "event-123"}},
+    )
 
 
 class _FakeWebSocket:

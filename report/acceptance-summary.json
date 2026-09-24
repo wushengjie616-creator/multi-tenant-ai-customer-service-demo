@@ -1,0 +1,33 @@
+{
+  "generated_at": "2026-09-24T18:14:31+08:00",
+  "command": "make acceptance",
+  "exit_code": 0,
+  "unit_and_integration": {
+    "passed": 220,
+    "failed": 0,
+    "coverage_percent": 76.14,
+    "coverage_threshold_percent": 70
+  },
+  "e2e": {
+    "passed": 10,
+    "failed": 0
+  },
+  "evaluation": {
+    "routing_samples": 50,
+    "intent_accuracy": 1.0,
+    "tool_routing_accuracy": 1.0,
+    "handoff_accuracy": 1.0,
+    "unauthorized_refusal_rate": 1.0,
+    "rag_samples": 5,
+    "rag_factual_accuracy": 1.0,
+    "rag_citation_hit_rate": 1.0,
+    "rag_style_compliance_rate": 1.0
+  },
+  "readiness": {
+    "status": "ok",
+    "postgres": "ok",
+    "redis": "ok",
+    "nats": "ok",
+    "qdrant": "ok"
+  }
+}

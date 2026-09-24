@@ -11,6 +11,23 @@ const actionRules = [
   [/人工|客服|老师回复/, "services", "办事服务"],
 ];
 const panelNames = { overview: "首页", learning: "学习中心", finance: "财务中心", services: "办事服务", reminders: "提醒中心", assistant: "AI 客服" };
+
+const reminderLeadLabel = document.createElement("label");
+const unsupportedMonthly = $("reminder-repeat").querySelector('option[value="monthly"]');
+if (unsupportedMonthly) unsupportedMonthly.remove();
+if (!$("reminder-repeat").querySelector('option[value="weekdays"]')) {
+  const weekdays = document.createElement("option"); weekdays.value = "weekdays"; weekdays.textContent = "工作日";
+  $("reminder-repeat").append(weekdays);
+}
+reminderLeadLabel.textContent = "提前提醒";
+const reminderLeadSelect = document.createElement("select");
+reminderLeadSelect.id = "reminder-lead-time";
+[[0, "到点提醒"], [30, "提前 30 分钟"], [60, "提前 1 小时"], [1440, "提前 1 天"]].forEach(([value, label]) => {
+  const option = document.createElement("option"); option.value = value; option.textContent = label;
+  if (value === 30) option.selected = true; reminderLeadSelect.append(option);
+});
+reminderLeadLabel.append(reminderLeadSelect);
+$("reminder-form").insertBefore(reminderLeadLabel, $("reminder-form").querySelector("button"));
 const managedPreview = new URLSearchParams(window.location.search).get("managed") === "1" ? JSON.parse(sessionStorage.getItem("tenantCustomerSession") || "null") : null;
 if (managedPreview) {
   const previewName = managedPreview.tenantName || "租户客户服务";
@@ -85,7 +102,8 @@ function decorateAssistantReply(node, item, index, messages) {
   } else if (/提醒/.test(question)) {
     const content = document.createElement("input"); content.value = "数学思维课准备文具和课本"; content.placeholder = "提醒事项";
     const time = document.createElement("input"); time.type = "datetime-local"; const next = new Date(Date.now() + 86400000); next.setHours(18, 0, 0, 0); time.value = new Date(next.getTime() - next.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-    panel.append(content, time, actionButton("确认创建提醒", async () => { try { const result = await Demo.api("/reminders", { method: "POST", token: customerSession.token, body: JSON.stringify({ conversation_id: customerSession.conversationId, content: content.value, run_at_local: time.value, timezone: "Asia/Shanghai", repeat: "once" }) }); Demo.setStatus(status, `提醒已创建：${new Date(result.next_run_at).toLocaleString("zh-CN")}`); } catch (error) { Demo.setStatus(status, error.message, true); } }));
+    const lead = reminderLeadSelect.cloneNode(true); lead.removeAttribute("id");
+    panel.append(content, time, lead, actionButton("确认创建提醒", async () => { try { const result = await Demo.api("/reminders", { method: "POST", token: customerSession.token, body: JSON.stringify({ conversation_id: customerSession.conversationId, content: content.value, run_at_local: time.value, timezone: "Asia/Shanghai", repeat: "once", lead_time_minutes: Number(lead.value) }) }); Demo.setStatus(status, `事项时间：${new Date(result.scheduled_for_at).toLocaleString("zh-CN")}，将提前 ${result.lead_time_minutes} 分钟通知。`); } catch (error) { Demo.setStatus(status, error.message, true); } }));
   } else if (/课表/.test(question)) {
     panel.append(actionButton("查看我的课表（点击可跳转至学习中心窗口）", () => { showPanel("learning"); $("load-schedule").click(); }));
   } else if (/学习报告|学习进度|成绩/.test(question)) {
@@ -204,10 +222,10 @@ $("prompt-continue-handoff").addEventListener("click", () => respondToHandoffClo
 async function loadReminders() {
   if (!customerSession) return;
   try { const result = await Demo.api("/reminders", { token: customerSession.token }); const box = $("reminder-list"); box.replaceChildren(); if (!(result.reminders || []).length) { const empty = document.createElement("div"); empty.className = "empty compact"; empty.textContent = "暂无提醒，可在左侧新建。"; box.append(empty); return; }
-    result.reminders.forEach((item) => { const card = document.createElement("article"); card.className = `reminder-item ${item.status}`; const body = document.createElement("div"); const title = document.createElement("strong"); title.textContent = item.content; const meta = document.createElement("p"); meta.textContent = `${new Date(item.next_run_at).toLocaleString("zh-CN")} · ${item.repeat} · ${item.status}`; body.append(title, meta); const actions = document.createElement("div"); actions.className = "row"; const edit = document.createElement("button"); edit.className = "text-button"; edit.textContent = "修改"; edit.disabled = item.status !== "active"; edit.addEventListener("click", async () => { const content = window.prompt("修改提醒内容", item.content); if (!content || content === item.content) return; await Demo.api(`/reminders/${item.id}`, { method: "PATCH", token: customerSession.token, body: JSON.stringify({ content, version: item.version }) }); await loadReminders(); }); const cancel = document.createElement("button"); cancel.className = "text-button danger-text"; cancel.textContent = "取消"; cancel.disabled = item.status !== "active"; cancel.addEventListener("click", async () => { await Demo.api(`/reminders/${item.id}`, { method: "DELETE", token: customerSession.token }); await loadReminders(); }); actions.append(edit, cancel); card.append(body, actions); box.append(card); });
+    result.reminders.forEach((item) => { const card = document.createElement("article"); card.className = `reminder-item ${item.status}`; const body = document.createElement("div"); const title = document.createElement("strong"); title.textContent = item.content; const meta = document.createElement("p"); meta.textContent = `事项：${new Date(item.scheduled_for_at).toLocaleString("zh-CN")} · 提前 ${item.lead_time_minutes} 分钟 · ${item.repeat} · ${item.status}`; body.append(title, meta); const actions = document.createElement("div"); actions.className = "row"; const edit = document.createElement("button"); edit.className = "text-button"; edit.textContent = "修改"; edit.disabled = item.status !== "active"; edit.addEventListener("click", async () => { const content = window.prompt("修改提醒内容", item.content); if (!content || content === item.content) return; await Demo.api(`/reminders/${item.id}`, { method: "PATCH", token: customerSession.token, body: JSON.stringify({ content, version: item.version }) }); await loadReminders(); }); const cancel = document.createElement("button"); cancel.className = "text-button danger-text"; cancel.textContent = "取消"; cancel.disabled = item.status !== "active"; cancel.addEventListener("click", async () => { await Demo.api(`/reminders/${item.id}`, { method: "DELETE", token: customerSession.token }); await loadReminders(); }); actions.append(edit, cancel); card.append(body, actions); box.append(card); });
   } catch (error) { Demo.setStatus($("reminder-list-status"), error.message, true); }
 }
-$("reminder-form").addEventListener("submit", async (event) => { event.preventDefault(); if (!requireSession($("reminder-form-status"))) return; try { await Demo.api("/reminders", { method: "POST", token: customerSession.token, body: JSON.stringify({ conversation_id: customerSession.conversationId, content: $("reminder-content").value, run_at_local: $("reminder-time").value, timezone: "Asia/Shanghai", repeat: $("reminder-repeat").value }) }); Demo.setStatus($("reminder-form-status"), "提醒创建成功。"); await loadReminders(); } catch (error) { Demo.setStatus($("reminder-form-status"), error.message, true); } });
+$("reminder-form").addEventListener("submit", async (event) => { event.preventDefault(); if (!requireSession($("reminder-form-status"))) return; try { await Demo.api("/reminders", { method: "POST", token: customerSession.token, body: JSON.stringify({ conversation_id: customerSession.conversationId, content: $("reminder-content").value, run_at_local: $("reminder-time").value, timezone: "Asia/Shanghai", repeat: $("reminder-repeat").value, lead_time_minutes: Number($("reminder-lead-time").value) }) }); Demo.setStatus($("reminder-form-status"), "提醒创建成功。"); await loadReminders(); } catch (error) { Demo.setStatus($("reminder-form-status"), error.message, true); } });
 $("refresh-reminders").addEventListener("click", loadReminders);
 Demo.bindComposer($("chat-form"), $("chat-input"), $("chat-status"), () => customerSession, $("messages"));
 setInterval(loadActiveHandoff, 2000);

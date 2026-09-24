@@ -167,6 +167,66 @@ async def test_reminder_and_handoff_are_owned_and_idempotent(client, make_user, 
     assert "parent@example.com" not in first.json()["summary"]
 
 
+async def test_reminder_supports_lead_time_and_exposes_target_time(client, make_user, make_conversation):
+    user = await make_user()
+    conversation = await make_conversation(user["tenant_id"], user["user_id"])
+    local = (datetime.now(ZoneInfo("Asia/Shanghai")) + timedelta(hours=2)).replace(microsecond=0, tzinfo=None)
+    response = await client.post(
+        "/reminders", headers=headers(user),
+        json={"conversation_id": conversation, "content": "英语课", "run_at_local": local.isoformat(),
+              "timezone": "Asia/Shanghai", "repeat": "once", "lead_time_minutes": 30},
+    )
+    assert response.status_code == 201
+    body = response.json()
+    target = datetime.fromisoformat(body["scheduled_for_at"])
+    notify = datetime.fromisoformat(body["next_run_at"])
+    assert target - notify == timedelta(minutes=30)
+    assert body["lead_time_minutes"] == 30
+
+
+async def test_timezone_cannot_be_changed_without_new_local_time(client, make_user, make_conversation):
+    user = await make_user()
+    conversation = await make_conversation(user["tenant_id"], user["user_id"])
+    local = (datetime.now(ZoneInfo("Asia/Shanghai")) + timedelta(hours=2)).replace(tzinfo=None).isoformat()
+    created = await client.post("/reminders", headers=headers(user), json={
+        "conversation_id": conversation, "content": "上课", "run_at_local": local,
+        "timezone": "Asia/Shanghai", "repeat": "once",
+    })
+    changed = await client.patch(f"/reminders/{created.json()['id']}", headers=headers(user), json={
+        "timezone": "Europe/London", "version": created.json()["version"],
+    })
+    assert changed.status_code == 422
+
+
+async def test_two_consecutive_dissatisfied_messages_create_handoff(
+    make_user, make_conversation, monkeypatch
+):
+    from app.services.assistant_service import generate_reply
+
+    user = await make_user()
+    async with async_session() as session:
+        tenant = await session.get(__import__("app.models", fromlist=["Tenant"]).Tenant, uuid.UUID(user["tenant_id"]))
+        tenant.features = ["assistant", "handoff"]
+        await session.commit()
+    conversation = await make_conversation(user["tenant_id"], user["user_id"])
+    payload = {
+        "tenant_id": user["tenant_id"], "user_id": user["user_id"],
+        "conversation_id": conversation, "message_id": "feedback-1", "content": "还是不对",
+    }
+    async with async_session() as session:
+        first = await generate_reply(session, payload)
+        assert "转接" not in first
+        payload["message_id"] = "feedback-2"
+        payload["content"] = "这个回答答非所问"
+        second = await generate_reply(session, payload)
+    assert "已为您发起人工转接" in second
+    async with async_session() as session:
+        handoff = await session.scalar(select(Handoff).where(Handoff.conversation_id == uuid.UUID(conversation)))
+        assert handoff is not None and handoff.reason == "repeated_dissatisfaction"
+        conversation_row = await session.get(__import__("app.models", fromlist=["Conversation"]).Conversation, uuid.UUID(conversation))
+        assert conversation_row.dissatisfaction_count == 0
+
+
 async def test_duplicate_active_reminder_same_time_and_title_is_rejected(client, make_user, make_conversation):
     user = await make_user()
     conversation = await make_conversation(user["tenant_id"], user["user_id"])
@@ -366,12 +426,20 @@ async def test_low_risk_platform_command_is_idempotent(client, make_user, make_c
         "idempotency_key": "leave-request-001",
     }
     first = await client.post("/commands/submit-leave", json=payload, headers=headers(user))
+    exact_retry = await client.post("/commands/submit-leave", json=payload, headers=headers(user))
     conflicting_retry = {**payload, "arguments": {"date": "2026-09-26", "reason": "changed"}}
-    second = await client.post("/commands/submit-leave", json=conflicting_retry, headers=headers(user))
+    conflict = await client.post("/commands/submit-leave", json=conflicting_retry, headers=headers(user))
 
-    assert first.status_code == second.status_code == 200
-    assert first.json()["execution_id"] == second.json()["execution_id"]
+    assert first.status_code == exact_retry.status_code == 200
+    assert first.json()["execution_id"] == exact_retry.json()["execution_id"]
+    assert conflict.status_code == 409
+    assert conflict.json()["error"] == "IDEMPOTENCY_CONFLICT"
     assert len(calls) == 1
+    async with async_session() as session:
+        audit = await session.scalar(
+            select(AuditLog).where(AuditLog.action == "platform.command.submit_leave")
+        )
+        assert audit is not None and audit.outcome == "success"
 
 
 async def test_open_auto_renew_is_immediate_and_idempotent(client, make_user, make_conversation, monkeypatch):
@@ -398,7 +466,10 @@ async def test_open_auto_renew_is_immediate_and_idempotent(client, make_user, ma
     assert first.json()["result"]["enabled"] is True
     assert len(calls) == 1
     assert calls[0][0] == "open_auto_renew"
-    assert calls[0][1] == {"resource_id": "membership-2026", "plan": "annual"}
+    assert calls[0][1] == {
+        "resource_id": "membership-2026", "plan": "annual",
+        "tenant_id": user["tenant_id"], "user_id": user["user_id"],
+    }
     assert len(calls[0][2]) == 64
 
 

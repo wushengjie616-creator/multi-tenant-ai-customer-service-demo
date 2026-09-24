@@ -10,6 +10,7 @@ class LoadScenario(str, Enum):
     BURST = "burst"
     FINANCE = "finance"
     LLM_TIMEOUT = "llm-timeout"
+    WS_CAPACITY = "ws-capacity"
 
 
 def load_scenario() -> LoadScenario:

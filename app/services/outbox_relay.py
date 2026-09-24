@@ -31,10 +31,10 @@ async def relay_once(
     current = now or datetime.now(timezone.utc)
     claimed = await _claim(session_factory, current)
     published = 0
-    for pk, subject, payload in claimed:
+    for pk, event_id, subject, payload in claimed:
         try:
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            await publish_bytes(js, subject, data)
+            await publish_bytes(js, subject, data, message_id=event_id)
             await _mark_published(session_factory, pk, current)
             published += 1
         except Exception as exc:  # noqa: BLE001
@@ -47,7 +47,7 @@ async def relay_once(
 
 async def _claim(
     session_factory: async_sessionmaker, now: datetime
-) -> list[tuple[uuid.UUID, str, dict]]:
+) -> list[tuple[uuid.UUID, str, str, dict]]:
     """用 `FOR UPDATE SKIP LOCKED` 抢占 pending 事件，并回吸卡死的 publishing。"""
     stale = now - timedelta(seconds=CLAIM_STALE_SECONDS)
     async with session_factory() as session:
@@ -75,7 +75,7 @@ async def _claim(
             row.attempts += 1
             row.claimed_at = now
         await session.commit()
-        return [(r.id, r.subject, r.payload) for r in rows]
+        return [(r.id, r.event_id, r.subject, r.payload) for r in rows]
 
 
 async def _mark_published(

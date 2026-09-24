@@ -1,6 +1,5 @@
 """把结构化意图映射到安全业务能力；LLM 只用于无副作用闲聊。"""
 
-import json
 import uuid
 
 from app.clients.finance_client import finance_client
@@ -11,7 +10,7 @@ from app.demo_catalog import demo_tenant_ids
 from app.models import Tenant
 from app.clients.platform_client import platform_client  # noqa: F401 - 安全测试观察边界
 from app.services import command_service, handoff_service
-from app.services.finance_service import safe_finance_result
+from app.services.finance_service import format_finance_reply, query_with_audit
 from app.services.intent_service import classify_intent, classify_intent_with_llm
 from app.services.knowledge_ingestion import extract_query_entities
 from app.services.rag_service import answer_question
@@ -64,6 +63,19 @@ def _fixed_demo_reply(text: str) -> str | None:
 async def generate_reply(session, payload: dict, *, context_store=None) -> str:
     text = payload.get("content", "")
     tenant_llm = _llm_for_tenant(payload["tenant_id"])
+    if session is not None and payload["tenant_id"] not in {str(item) for item in demo_tenant_ids()}:
+        conversation_id = uuid.UUID(payload["conversation_id"])
+        count = await handoff_service.record_feedback(session, conversation_id, text)
+        if handoff_service.should_handoff(explicit_request=False, dissatisfaction_count=count):
+            tenant = await session.get(Tenant, uuid.UUID(payload["tenant_id"]))
+            if tenant is None or "handoff" not in (tenant.features or []):
+                return "我理解前面的回答没有解决问题。当前租户未配置人工服务，请补充具体需求。"
+            await handoff_service.create_handoff(
+                session, tenant_id=uuid.UUID(payload["tenant_id"]), user_id=uuid.UUID(payload["user_id"]),
+                conversation_id=conversation_id, summary=text, reason="repeated_dissatisfaction",
+                context={"intent": "human_handoff", "dissatisfaction_count": count},
+            )
+            return "连续两次未能解决您的问题，已为您发起人工转接。"
     if "隔壁公司" in text or "其他租户" in text:
         return "不知道。当前租户只能访问自己的知识库，无法查询其他公司的课程、优惠或客户信息。"
     is_curated_demo = payload["tenant_id"] in {str(item) for item in demo_tenant_ids()}
@@ -117,12 +129,11 @@ async def generate_reply(session, payload: dict, *, context_store=None) -> str:
         return answer + (f"\n来源：{citations}" if citations else "")
     if decision.intent == "finance":
         kind = next((value for word, value in (("发票", "invoice"), ("账单", "bill"), ("余额", "balance"), ("订单", "order"), ("退", "refund")) if word in text), "order")
-        try:
-            data = await finance_client.query(kind, payload["tenant_id"], payload["user_id"])
-            result = safe_finance_result(data)
-        except Exception as exc:
-            result = safe_finance_result(None, error=type(exc).__name__)
-        return result.get("message") or json.dumps(result["data"], ensure_ascii=False)
+        result = await query_with_audit(
+            session, finance_client, kind=kind,
+            tenant_id=payload["tenant_id"], user_id=payload["user_id"],
+        )
+        return format_finance_reply(kind, result)
     if decision.intent == "human_handoff":
         tenant = await session.get(Tenant, uuid.UUID(payload["tenant_id"]))
         if tenant is None or "handoff" not in (tenant.features or []):

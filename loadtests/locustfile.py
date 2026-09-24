@@ -17,6 +17,7 @@ CONVERSATION_ID = os.getenv(
 )
 SCENARIO = load_scenario()
 RATE_PER_USER = float(os.getenv("LOADTEST_RATE_PER_USER", "4"))
+MESSAGE_CONTENT = os.getenv("LOADTEST_MESSAGE_CONTENT", "请介绍课程政策")
 
 
 def load_token() -> str:
@@ -49,7 +50,7 @@ class WebhookUser(AuthenticatedUser):
             "tenant_id": TENANT_ID,
             "user_id": USER_ID,
             "conversation_id": CONVERSATION_ID,
-            "content": "请介绍课程政策",
+            "content": MESSAGE_CONTENT,
         }
         with self.client.post(
             "/webhooks/im/messages",
@@ -136,6 +137,8 @@ class WebSocketUser(AuthenticatedUser):
         started = time.perf_counter()
         total_bytes = 0
         error = None
+        ack_recorded = False
+        first_response_recorded = False
         try:
             self.ws.send(
                 json.dumps(
@@ -150,9 +153,37 @@ class WebSocketUser(AuthenticatedUser):
                 raw = self.ws.recv(timeout=15)
                 total_bytes += len(raw)
                 event = json.loads(raw)
+                event_type = event.get("type")
+                payload = event.get("payload", {})
                 if (
-                    event.get("type") == "reply.end"
-                    and event.get("payload", {}).get("in_reply_to") == message_id
+                    not ack_recorded
+                    and event_type == "message.accepted"
+                    and event.get("message_id") == message_id
+                ):
+                    self.environment.events.request.fire(
+                        request_type="WS",
+                        name="message ACK",
+                        response_time=(time.perf_counter() - started) * 1000,
+                        response_length=len(raw),
+                        exception=None,
+                    )
+                    ack_recorded = True
+                if (
+                    not first_response_recorded
+                    and event_type == "reply.chunk"
+                    and payload.get("in_reply_to") == message_id
+                ):
+                    self.environment.events.request.fire(
+                        request_type="WS",
+                        name="first response",
+                        response_time=(time.perf_counter() - started) * 1000,
+                        response_length=len(raw),
+                        exception=None,
+                    )
+                    first_response_recorded = True
+                if (
+                    event_type == "reply.end"
+                    and payload.get("in_reply_to") == message_id
                 ):
                     break
         except Exception as exc:
@@ -163,7 +194,7 @@ class WebSocketUser(AuthenticatedUser):
                 self.ws = None
         self.environment.events.request.fire(
             request_type="WS",
-            name="message round-trip",
+            name="full response",
             response_time=(time.perf_counter() - started) * 1000,
             response_length=total_bytes,
             exception=error,
@@ -172,6 +203,50 @@ class WebSocketUser(AuthenticatedUser):
 
 class LLMTimeoutUser(WebSocketUser):
     abstract = SCENARIO is not LoadScenario.LLM_TIMEOUT
+
+
+class WebSocketCapacityUser(AuthenticatedUser):
+    """Open and hold one authenticated WebSocket per simulated user."""
+
+    abstract = SCENARIO is not LoadScenario.WS_CAPACITY
+    wait_time = between(1, 2)
+
+    def on_start(self):
+        super().on_start()
+        self.ws = None
+        self._connect()
+
+    def _connect(self):
+        ws_host = self.host.replace("https://", "wss://").replace("http://", "ws://")
+        started = time.perf_counter()
+        try:
+            self.ws = connect(
+                f"{ws_host}/ws?conversation_id={CONVERSATION_ID}",
+                additional_headers={"Authorization": f"Bearer {TOKEN}"},
+                open_timeout=5,
+                proxy=None,
+                legacy=True,
+            )
+            error = None
+        except Exception as exc:
+            self.ws = None
+            error = exc
+        self.environment.events.request.fire(
+            request_type="WS",
+            name="connect and hold",
+            response_time=(time.perf_counter() - started) * 1000,
+            response_length=0,
+            exception=error,
+        )
+
+    def on_stop(self):
+        if self.ws is not None:
+            self.ws.close()
+
+    @task
+    def websocket_message(self):
+        if self.ws is None:
+            self._connect()
 
 
 class MixedCustomerUser(WebSocketUser):

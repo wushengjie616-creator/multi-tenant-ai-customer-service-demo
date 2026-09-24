@@ -36,6 +36,11 @@ def test_unknown_text_abstains_instead_of_guessing_tool():
     assert result.abstain_reason == "no_rule_match"
 
 
+@pytest.mark.parametrize("text", ["请假规则是什么？", "缺课和补课规则怎么规定？"])
+def test_leave_policy_questions_are_knowledge_not_write_commands(text):
+    assert classify_intent(text).intent == "attendance_policy"
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [

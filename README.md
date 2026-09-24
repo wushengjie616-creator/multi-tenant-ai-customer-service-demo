@@ -14,6 +14,7 @@
   - 财务查询 —— 订单/账单/发票/退费/余额，返回前递归脱敏。
 - **多租户隔离与安全**：JWT 认证 + RBAC（`user` / `agent` / `admin`）；租户与资源归属强制校验；PII 脱敏；审计日志；LLM 无工具执行权限。
 - **人工转接**：连续两次不满触发，投递脱敏后的上下文包，在线/离线分别处理。
+- **提前提醒**：事项时间与通知时间分开持久化，支持到点、提前 30 分钟、1 小时或自定义分钟数。
 - **高并发治理**：tenant/user 双维限流（Lua 原子计数）、下游独立超时/重试/熔断、Redis 热上下文缓存（PostgreSQL 为事实源，故障自动回填）。
 - **可观测**：Prometheus 指标、JSON 结构化日志（自动脱敏）、OpenTelemetry trace 贯穿 API → NATS → worker → 下游。
 
@@ -134,7 +135,7 @@ curl http://localhost:8000/health/live    # 进程存活
 - **虚拟租户演示**：入口固定展示 `T01–T05` 五个策展租户，避免历史手工测试数据影响录屏。短编号只用于展示，底层仍用 UUID tenant_id 隔离。虚拟链路可从租户工作台进入所选模拟客户视角，并只返回演示租户列表或首页，不与新建租户链路串联。
 - **租户注册 / 登录**：`/ui/tenant-auth.html` 同页提供注册和已有租户登录；已有管理员使用租户 ID、邮箱和密码恢复 `/ui/tenant.html` 工作台。新建租户的 AI 客服按 `.env` 使用真实 LLM：确定性关键词先识别明确业务，未命中时由受白名单约束的 LLM 分类，再进入租户隔离的 RAG 检索或对应功能导航；页面只展示已启用模块。T01–T05 演示租户始终使用确定性 Mock，便于稳定录屏。
 - **人工客服工作台**：启用人工服务的租户可从租户平台进入独立 `/ui/agent.html`。客服可接入会话、使用常用话术模板一键填充并发送、发起结束；客户侧实时展示待处理/处理中/待确认结束/已结束，客户可确认或继续，10 分钟不回应由 scheduler 自动结束。
-- **LLM 全局排队池**：所有进程通过 Redis 共享准入状态，最多 600 个已发出的在途 LLM 请求，滚动一秒最多启动 20 个；第 601 个或超过 20/秒的请求等待，不向 DeepSeek 建立新连接。Redis 故障时记录告警并降级直连。
+- **LLM 全局排队池**：所有进程通过 Redis 共享准入状态，最多 600 个已发出的在途 LLM 请求，滚动一秒最多启动 20 个；第 601 个或超过 20/秒的请求等待，不向 DeepSeek 建立新连接。Redis 故障时使用进程内有界 semaphore + 每秒启动限制，不会无限直连。
 - **Token 成本**：每次 LLM 调用记录供应商 `usage`，Mock 无 usage 时使用字符估算。租户工作台按会话展示输入、输出、总 token 和成本；单价由 `LLM_INPUT_COST_PER_MILLION_USD` 与 `LLM_OUTPUT_COST_PER_MILLION_USD` 配置，默认 0，避免对未知模型价格作错误假设。
 
 建议验收时直接使用 [Word 要求验收对照](docs/acceptance-checklist.md) 和 [10–15 分钟演示剧本](docs/demo-script.md)。`make acceptance` 会依次执行 70% 覆盖率门禁、E2E、50 条 LLM 评测和就绪检查。
@@ -146,8 +147,8 @@ curl http://localhost:8000/health/live    # 进程存活
 | LLM | `DEEPSEEK_API_URL` / `DEEPSEEK_API_KEY` / `DEEPSEEK_MODEL` | 真实 DeepSeek；留空则走本地 mock-llm |
 | 演示登录 | `DEMO_TENANT_ADMIN_EMAIL` / `DEMO_TENANT_ADMIN_PASSWORD` | 租户工作台登录账号 |
 | 客户样例 | `DEMO_CUSTOMER_TENANT_ID` / `DEMO_CUSTOMER_KNOWLEDGE_ROOT` | 客户一键示例的独立固定租户与本地知识目录 |
-| 安全 | `JWT_SECRET` | 仅本地开发用；**生产必须替换并从密钥系统注入** |
-| 开关 | `DEMO_MODE` | 非演示环境必须设为 `false`（关闭一键客户会话） |
+| 安全 | `JWT_SECRET` | 仅本地开发用；生产样环境使用空值/弱默认值时服务会拒绝启动 |
+| 开关 | `DEMO_MODE` | 应用默认为 `false`；Compose 本地演示显式开启，生产样环境开启时服务会拒绝启动 |
 | 限流 | `TENANT_RATE_LIMIT_PER_MINUTE` / `USER_RATE_LIMIT_PER_MINUTE` | 租户/用户每分钟配额 |
 | 上下文 | `CONTEXT_MAX_MESSAGES` / `CONTEXT_TTL_SECONDS` | Redis 热上下文窗口与 TTL |
 
@@ -315,6 +316,8 @@ report/          面试提交版报告（含压测报告）
 
 ## 已知限制
 
-- 压测为本地面试规模，尚未在固定资源环境执行 500 WS / 200 msg/s 等正式容量测试；详见压测报告。
+正式交付结论与证据索引见 **[`report/正式验收报告.md`](report/正式验收报告.md)**；容量、WebSocket 多实例广播和 Prometheus 补齐方案见 **[`docs/optimization/06-08-delivery-optimization-plan.md`](docs/optimization/06-08-delivery-optimization-plan.md)**。
+
+- 已在本地 2C4G 环境执行 500 WS、200 msg/s 稳定流、1000 msg/s 突发、100 QPS 财务和 20% LLM 超时场景。500 WS 与财务通过；200 msg/s 入口通过但消费未追平；1000 msg/s 未达标。详见压测报告与正式验收报告。
 - Redis 中断、NATS 中断和 worker 积压恢复已有 `make faulttest` 可重复证据；详见 [`report/故障注入报告.md`](report/故障注入报告.md)。
 - 确定性 embedding 负责低成本候选召回，语义弹性依赖 DeepSeek 改写与有上限的语义重排，适合演示与小型租户库，不代表大规模专用 embedding 模型的容量表现。

@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -52,7 +53,7 @@ class Settings(BaseSettings):
     llm_output_cost_per_million_usd: float = 0.0
 
     # Local interview demo. Disable DEMO_MODE outside a disposable demo environment.
-    demo_mode: bool = True
+    demo_mode: bool = False
     demo_tenant_id: str = "10000000-0000-0000-0000-000000000001"
     demo_tenant_name: str = "演示租户1"
     demo_admin_user_id: str = "10000000-0000-0000-0000-000000000100"
@@ -70,6 +71,16 @@ class Settings(BaseSettings):
     demo_max_upload_chars: int = 200_000
     knowledge_lexical_scan_limit: int = 500
     rag_semantic_candidate_limit: int = 40
+
+    @model_validator(mode="after")
+    def validate_security_boundary(self):
+        environment = self.app_env.strip().lower()
+        if environment not in {"development", "test", "demo"}:
+            if not self.jwt_secret or self.jwt_secret == "dev_secret_change_me":
+                raise ValueError("production-like environments require a non-default JWT_SECRET")
+            if self.demo_mode:
+                raise ValueError("DEMO_MODE must be disabled outside development/demo/test")
+        return self
 
 
 @lru_cache

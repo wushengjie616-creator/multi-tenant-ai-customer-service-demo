@@ -1,10 +1,11 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from app.services import assistant_service
 from app.schemas.intent import IntentResult
 from app.core.config import settings
+from app.models import AuditLog
 
 
 async def test_unknown_and_prompt_injection_never_call_business_tools(monkeypatch):
@@ -153,7 +154,8 @@ async def test_fixed_virtual_tenant_does_not_offer_cancel_when_auto_renew_is_off
 async def test_real_tenant_without_handoff_feature_does_not_claim_transfer(monkeypatch):
     tenant = type("Tenant", (), {"features": ["assistant", "knowledge"]})()
     session = AsyncMock()
-    session.get.return_value = tenant
+    conversation = type("Conversation", (), {"dissatisfaction_count": 0})()
+    session.get.side_effect = lambda model, _id: tenant if model is assistant_service.Tenant else conversation
     create = AsyncMock()
     monkeypatch.setattr(assistant_service.handoff_service, "create_handoff", create)
     tenant_id = "90000000-0000-0000-0000-000000000001"
@@ -262,6 +264,28 @@ async def test_grounded_knowledge_answer_is_synthesized_but_citations_stay_serve
     assert messages[0]["role"] == "system"
     assert "只能依据" in messages[0]["content"]
     assert "退款将在 7-15 个工作日内原路退回。" in messages[1]["content"]
+
+
+async def test_chat_finance_query_records_audit_and_returns_natural_language(monkeypatch):
+    session = AsyncMock()
+    session.add = MagicMock()
+    session.get.return_value = type("Conversation", (), {"dissatisfaction_count": 0})()
+    finance = AsyncMock()
+    finance.query.return_value = {"order_id": "EDU-1", "amount": 2399, "status": "issued", "email": "parent@example.com"}
+    monkeypatch.setattr(assistant_service, "finance_client", finance)
+    monkeypatch.setattr(
+        assistant_service, "classify_intent",
+        lambda _: IntentResult(intent="finance", confidence=1, source="rule"),
+    )
+    tenant_id = "90000000-0000-0000-0000-000000000001"
+    user_id = "90000000-0000-0000-0000-000000000101"
+    reply = await assistant_service.generate_reply(session, {
+        "content": "查询我的发票", "tenant_id": tenant_id, "user_id": user_id,
+        "conversation_id": "90000000-0000-0000-0000-000000000201",
+    })
+    assert "EDU-1" in reply and "¥2,399" in reply and not reply.startswith("{")
+    audit = next(call.args[0] for call in session.add.call_args_list if isinstance(call.args[0], AuditLog))
+    assert audit.action == "finance.invoice" and audit.outcome == "success"
 
 
 async def test_unknown_intent_searches_tenant_knowledge_before_declining(monkeypatch):

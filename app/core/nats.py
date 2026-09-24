@@ -45,14 +45,22 @@ async def ensure_stream(js) -> None:
         raise
 
 
-async def publish_bytes(js, subject: str, data: bytes) -> None:
+async def publish_bytes(
+    js, subject: str, data: bytes, *, message_id: str | None = None
+) -> None:
     """发布字节到 EVENTS stream（JetStream ack 即 publisher confirm）。"""
-    await js.publish(subject, data, stream=STREAM_NAME)
+    kwargs = {"stream": STREAM_NAME}
+    if message_id:
+        kwargs["headers"] = {"Nats-Msg-Id": message_id}
+    await js.publish(subject, data, **kwargs)
 
 
 async def publish(js, subject: str, envelope) -> None:
     """发布 EventEnvelope 到指定主题（序列化为 JSON 字节）。"""
-    await publish_bytes(js, subject, envelope.model_dump_json().encode("utf-8"))
+    await publish_bytes(
+        js, subject, envelope.model_dump_json().encode("utf-8"),
+        message_id=envelope.event_id,
+    )
 
 
 async def subscribe(js, subject: str, durable: str, cb) -> None:

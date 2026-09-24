@@ -13,6 +13,7 @@ def test_load_scenario_accepts_required_interview_profiles(monkeypatch):
         ("burst", LoadScenario.BURST),
         ("finance", LoadScenario.FINANCE),
         ("llm-timeout", LoadScenario.LLM_TIMEOUT),
+        ("ws-capacity", LoadScenario.WS_CAPACITY),
     ):
         monkeypatch.setenv("LOADTEST_SCENARIO", value)
         assert load_scenario() is expected
