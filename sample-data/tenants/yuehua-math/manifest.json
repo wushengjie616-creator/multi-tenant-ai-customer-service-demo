@@ -1,29 +1,29 @@
 {
-  "tenant_key": "xueersi-hongkou",
-  "tenant_name": "虹口区学而思",
-  "tenant_id": "10000000-0000-0000-0000-000000000001",
-  "description": "虚构的英语培训机构（非真实客户），仅提供英语课程，用于演示租户隔离与学科知识问答。",
+  "tenant_key": "yuehua-math",
+  "tenant_name": "月华数学学院",
+  "tenant_id": "20000000-0000-0000-0000-000000000001",
+  "description": "虚构的数学培训机构（非真实客户），仅提供数学课程，用于演示租户隔离与学科知识问答。",
   "industry": "教育培训",
-  "subject": "英语",
+  "subject": "数学",
   "service": {
-    "hotline": "400-100-0001",
-    "email": "support@xueersi-hongkou.example.com",
+    "hotline": "400-200-0002",
+    "email": "support@yuehua-math.example.com",
     "business_hours": "工作日 09:00-21:00，周末 09:00-18:00"
   },
   "documents": [
     {
       "document_id": "course-policy",
-      "title": "英语课程政策",
-      "source": "xueersi://knowledge/course-policy",
+      "title": "数学课程政策",
+      "source": "yuehua://knowledge/course-policy",
       "version": 1,
       "language": "zh-CN",
       "file": "knowledge/course-policy.md",
-      "tags": ["英语", "课程", "请假", "补课", "转班"]
+      "tags": ["数学", "课程", "请假", "补课", "转班"]
     },
     {
       "document_id": "refund-policy",
       "title": "退费政策",
-      "source": "xueersi://knowledge/refund-policy",
+      "source": "yuehua://knowledge/refund-policy",
       "version": 1,
       "language": "zh-CN",
       "file": "knowledge/refund-policy.md",
@@ -32,16 +32,16 @@
     {
       "document_id": "activity-policy",
       "title": "活动政策",
-      "source": "xueersi://knowledge/activity-policy",
+      "source": "yuehua://knowledge/activity-policy",
       "version": 1,
       "language": "zh-CN",
       "file": "knowledge/activity-policy.md",
-      "tags": ["活动", "优惠", "英语角", "口语大赛"]
+      "tags": ["活动", "优惠", "挑战赛", "奥数"]
     },
     {
       "document_id": "service-agreement",
       "title": "服务协议",
-      "source": "xueersi://knowledge/service-agreement",
+      "source": "yuehua://knowledge/service-agreement",
       "version": 1,
       "language": "zh-CN",
       "file": "knowledge/service-agreement.md",
@@ -49,12 +49,12 @@
     },
     {
       "document_id": "faq",
-      "title": "英语常见问题",
-      "source": "xueersi://knowledge/faq",
+      "title": "数学常见问题",
+      "source": "yuehua://knowledge/faq",
       "version": 1,
       "language": "zh-CN",
       "file": "knowledge/faq.md",
-      "tags": ["常见问题", "FAQ", "英语"]
+      "tags": ["常见问题", "FAQ", "数学"]
     }
   ]
 }

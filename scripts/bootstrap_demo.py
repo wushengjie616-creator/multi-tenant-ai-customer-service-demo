@@ -36,11 +36,11 @@ async def bootstrap_database() -> None:
         # 历史样例曾让“四季”与当前星河租户复用同一 UUID；仅清理该已知虚构数据冲突。
         await session.execute(delete(User).where(
             User.tenant_id == customer_tenant_id,
-            User.email.like("%@siji-jingan.example.com"),
+            User.email.like("%@yuehua-math.example.com"),
         ))
         await session.execute(delete(User).where(
             User.tenant_id == workbench_tenant_id,
-            User.email.like("%@xueersi-hongkou.example.com"),
+            User.email.like("%@xinghui-english.example.com"),
         ))
         workbench_tenant = await session.get(Tenant, workbench_tenant_id)
         if workbench_tenant is None:
@@ -204,8 +204,8 @@ async def main() -> None:
         await engine.dispose()
         return
     await bootstrap_database()
-    roots = [Path(settings.demo_customer_knowledge_root), Path("sample-data/tenants/xueersi-hongkou")]
-    stale_manifest_path = Path("sample-data/tenants/siji-jingan/manifest.json")
+    roots = [Path(settings.demo_customer_knowledge_root), Path("sample-data/tenants/xinghui-english")]
+    stale_manifest_path = Path("sample-data/tenants/yuehua-math/manifest.json")
     if stale_manifest_path.exists():
         stale = json.loads(stale_manifest_path.read_text(encoding="utf-8"))
         if stale.get("tenant_id") == settings.demo_customer_tenant_id:
