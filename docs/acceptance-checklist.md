@@ -34,7 +34,7 @@
 | 全局 LLM 并发保护 | 加分实现 | Redis 全局准入：600 在途、20 starts/s，超额不建立 DeepSeek TCP 连接 |
 | 日志、Prometheus、trace、审计 | 通过 | JSON 日志、`/metrics`、OpenTelemetry Collector、traceparent 跨 NATS |
 | token 与成本按租户统计 | 通过 | `llm_usages` 迁移与租户工作台会话成本面板 |
-| Docker Compose / Mock / 迁移 / 健康检查 | 通过 | `make up`、5 个 Mock、Alembic 0001–0011、live/ready |
+| Docker Compose / Mock / 迁移 / 健康检查 | 通过 | `make up`、5 个 Mock、Alembic 0001–0012、live/ready |
 | 测试、压测、故障注入、LLM 评测 | 通过/规模边界已标注 | `make test`、Locust CSV、fault matrix、50 条 dataset |
 
 ## 不应夸大的边界

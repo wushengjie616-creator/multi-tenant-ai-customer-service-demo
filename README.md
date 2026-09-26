@@ -9,9 +9,10 @@
 - **IM 异步消息闭环**：HTTP webhook 与持久 WebSocket 双通道接入；事务型 outbox + NATS JetStream 实现「至少一次投递、业务恰好一次」；显式 ACK、有限重试、死信重放。
 - **四类核心业务**：
   - 平台指令 —— 课程表、学习报告、请假、课程提醒、自动续费（高风险操作二次确认）。
-  - 知识问答 —— 多表示语义 RAG，命中带来源，无证据拒答、不编造。
+  - 知识问答 —— 多表示语义 RAG + 知识图谱四层存储（实体/关系/同义/主题），命中带来源，无证据拒答、不编造。
   - 日程提醒 —— 单次/每天/每周/工作日，多实例调度、occurrence 幂等。
   - 财务查询 —— 订单/账单/发票/退费/余额，返回前递归脱敏。
+- **课程咨询**：槽位状态机多轮补全年级/科目后推荐课程；引导中表达强业务诉求（转人工/退款/指令/提醒）自动退出走正常流程。
 - **多租户隔离与安全**：JWT 认证 + RBAC（`user` / `agent` / `admin`）；租户与资源归属强制校验；PII 脱敏；审计日志；LLM 无工具执行权限。
 - **人工转接**：连续两次不满触发，投递脱敏后的上下文包，在线/离线分别处理。
 - **提前提醒**：事项时间与通知时间分开持久化，支持到点、提前 30 分钟、1 小时或自定义分钟数。
@@ -311,7 +312,7 @@ docker compose up -d --no-deps --force-recreate api worker scheduler mock-llm
 app/               FastAPI 应用本体
   api/              路由层：auth / admin / messages / websocket / business / knowledge / demo / health
   core/             横切底座：config / security / database / nats / redis / logging / metrics / tracing / circuit_breaker
-  services/         业务编排：intent / tool / command / rag / finance / reminder / handoff / outbox / audit ...
+  services/         业务编排：intent / tool / command / rag / finance / reminder / handoff / course_consult / graph / outbox / audit ...
   clients/          下游 HTTP 客户端：llm / finance / platform / knowledge / im
   workers/          后台消费者：message_worker（入站）、reminder_worker（到期提醒）
   models/           SQLAlchemy 模型
@@ -319,7 +320,7 @@ app/               FastAPI 应用本体
   middleware/       限流等中间件
   utils/            脱敏等工具
 mocks/             5 个确定性外部依赖 mock（im / llm / knowledge / platform / finance，各含 main.py 入口）
-migrations/        Alembic 迁移（versions/ 下 0001–0011）
+migrations/        Alembic 迁移（versions/ 下 0001–0012）
 tests/             unit / integration / e2e
 loadtests/         Locust 场景（HTTP + 持久 WebSocket）
 evaluation/        50 条固定评测集 + 评分器 + 报告
@@ -354,12 +355,14 @@ report/            面试提交版报告（压测 / 故障注入 / 正式验收 
 | | [app/api/business.py](app/api/business.py) | 指令 allowlist + Pydantic 参数校验（extra=forbid） |
 | | [app/services/command_service.py](app/services/command_service.py) | 二次确认 / 幂等 / 资源归属校验 |
 | | [app/services/assistant_service.py](app/services/assistant_service.py) | 主编排：意图 → 路由 → 安全检查 → 回复 |
+| | [app/services/course_consult_service.py](app/services/course_consult_service.py) + [course_recommendation.py](app/services/course_recommendation.py) | 课程咨询槽位状态机与推荐 |
 | **FR-3 平台指令** | [app/services/command_service.py](app/services/command_service.py) | 高风险二次确认状态机、幂等执行 |
 | | [app/clients/platform_client.py](app/clients/platform_client.py) | 调用 mock-platform |
 | | [mocks/mock_platform/main.py](mocks/mock_platform/main.py) | 平台指令 mock |
 | | [app/models/business.py](app/models/business.py) | confirmations / tool_executions 等业务模型 |
 | **FR-4 知识问答** | [app/services/rag_service.py](app/services/rag_service.py) | 检索合并 + 证据门控 + 引用生成 |
 | | [app/services/knowledge_ingestion.py](app/services/knowledge_ingestion.py) | 导入、分块、实体富化、重建索引 |
+| | [app/services/graph_extraction.py](app/services/graph_extraction.py) + [graph_store.py](app/services/graph_store.py) + [app/models/knowledge_graph.py](app/models/knowledge_graph.py) | 知识图谱四层抽取 / 存储 / 模型 |
 | | [app/api/knowledge.py](app/api/knowledge.py) | 上传 / 文档清单 / suggestions |
 | | [mocks/mock_knowledge/main.py](mocks/mock_knowledge/main.py) | 知识检索 mock |
 | **FR-5 日程提醒** | [app/api/business.py](app/api/business.py) | `/reminders` CRUD + `/reminders/parse` |
@@ -393,7 +396,7 @@ report/            面试提交版报告（压测 / 故障注入 / 正式验收 
 | 交付物 | 位置 |
 |---|---|
 | 单元 / 集成 / E2E 测试 | [tests/unit/](tests/unit/)、[tests/integration/](tests/integration/)、[tests/e2e/test_core_scenarios.py](tests/e2e/test_core_scenarios.py)（E2E-01~10） |
-| 数据库迁移 | [migrations/versions/](migrations/versions/)（0001–0011） |
+| 数据库迁移 | [migrations/versions/](migrations/versions/)（0001–0012） |
 | 压测脚本与报告 | [loadtests/](loadtests/) + [report/压测报告.md](report/压测报告.md) + [report/压测调试全过程.md](report/压测调试全过程.md) |
 | LLM 质量评测报告 | [docs/llm-evaluation.md](docs/llm-evaluation.md) + [evaluation/report.json](evaluation/report.json)（50 条固定集，`make evaluate` 生成；口径与指标见前者） |
 | 故障注入 | [scripts/fault_matrix.py](scripts/fault_matrix.py) + [report/故障注入报告.md](report/故障注入报告.md) + [report/fault-matrix.json](report/fault-matrix.json) |
