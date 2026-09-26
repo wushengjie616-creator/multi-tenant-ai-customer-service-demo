@@ -308,16 +308,106 @@ docker compose up -d --no-deps --force-recreate api worker scheduler mock-llm
 ## 目录结构
 
 ```
-app/             FastAPI 应用（api/core/models/schemas/services/clients/middleware/workers/utils）
-frontend/        FastAPI 直接托管的本地演示页面（无前端构建步骤）
-mocks/           5 个确定性的外部依赖 mock（llm/im/knowledge/platform/finance）
-migrations/      Alembic 迁移
-tests/           unit / integration / e2e
-loadtests/       Locust HTTP + 持久 WebSocket 场景
-evaluation/      50 条固定评测集、评分器与 JSON 报告
-sample-data/     示例知识库目录骨架（.gitkeep 占位；真实数据不提交，见「自定义示例知识库」）
-report/          面试提交版报告（含压测报告）
+app/               FastAPI 应用本体
+  api/              路由层：auth / admin / messages / websocket / business / knowledge / demo / health
+  core/             横切底座：config / security / database / nats / redis / logging / metrics / tracing / circuit_breaker
+  services/         业务编排：intent / tool / command / rag / finance / reminder / handoff / outbox / audit ...
+  clients/          下游 HTTP 客户端：llm / finance / platform / knowledge / im
+  workers/          后台消费者：message_worker（入站）、reminder_worker（到期提醒）
+  models/           SQLAlchemy 模型
+  schemas/          Pydantic / 事件 schema
+  middleware/       限流等中间件
+  utils/            脱敏等工具
+mocks/             5 个确定性外部依赖 mock（im / llm / knowledge / platform / finance，各含 main.py 入口）
+migrations/        Alembic 迁移（versions/ 下 0001–0011）
+tests/             unit / integration / e2e
+loadtests/         Locust 场景（HTTP + 持久 WebSocket）
+evaluation/        50 条固定评测集 + 评分器 + 报告
+sample-data/       演示租户知识库（manifest.json + knowledge/*.md）
+scripts/           Makefile 目标实际调用的脚本（seed / demo / fault_matrix / bootstrap / loadtest 身份池）
+frontend/          FastAPI 直接托管的演示页面（index / tenant-auth / tenant / customer / agent / platform）
+docs/              架构 / API / 验收对照 / 演示剧本 / agent 记录 / 分阶段设计
+observability/     Prometheus 采集与告警规则（prometheus.yml + alerts.yml）
+report/            面试提交版报告（压测 / 故障注入 / 正式验收 / 测试报告）
 ```
+
+顶层配置文件：`docker-compose.yml`（主拓扑）、`docker-compose.test.yml`（测试隔离）、`Dockerfile`、`Makefile`、`alembic.ini`、`pytest.ini`、`otel-collector-config.yaml`、`.env.example`、`PLAN.md`、`PROGRESS.md`。
+
+## 关键代码地图（对照 Word 要求）
+
+下面按原题 FR / NFR 编号，指出每块要求落在哪个文件。想快速定位「财务脱敏在哪」「二次确认在哪」直接查这张表即可。
+
+| Word 要求 | 关键文件 | 说明 |
+|---|---|---|
+| **入口 / 装配** | [app/main.py](app/main.py) | FastAPI 应用与路由装配 |
+| | [app/core/config.py](app/core/config.py) | `Settings`，全部环境变量集中定义 |
+| | [app/api/dependencies.py](app/api/dependencies.py) | `get_current_user` / `require_roles`（RBAC 依赖注入） |
+| **FR-1 IM 接入与会话** | [app/api/messages.py](app/api/messages.py) | HTTP webhook 入站、`message_id` 去重、消息补取 |
+| | [app/api/websocket.py](app/api/websocket.py) | WS 握手鉴权、多副本 fan-out、流式事件、游标恢复 |
+| | [app/services/outbox_relay.py](app/services/outbox_relay.py) | 事务型 outbox → NATS，至少一次投递 |
+| | [app/core/nats.py](app/core/nats.py) | JetStream 连接、主题、显式 ACK/NAK |
+| | [app/workers/message_worker.py](app/workers/message_worker.py) | 消费入站消息的主 worker |
+| | [app/services/context_service.py](app/services/context_service.py) | Redis 热上下文 + PostgreSQL 历史重建 |
+| | [app/models/message.py](app/models/message.py) · [conversation.py](app/models/conversation.py) · [outbox.py](app/models/outbox.py) | 消息 / 会话 / outbox 数据模型 |
+| **FR-2 意图与路由** | [app/services/intent_service.py](app/services/intent_service.py) | 规则优先 + LLM 兜底的混合路由 |
+| | [app/schemas/intent.py](app/schemas/intent.py) | `IntentResult`（意图 / 置信度 / 参数 / 风险） |
+| | [app/api/business.py](app/api/business.py) | 指令 allowlist + Pydantic 参数校验（extra=forbid） |
+| | [app/services/command_service.py](app/services/command_service.py) | 二次确认 / 幂等 / 资源归属校验 |
+| | [app/services/assistant_service.py](app/services/assistant_service.py) | 主编排：意图 → 路由 → 安全检查 → 回复 |
+| **FR-3 平台指令** | [app/services/command_service.py](app/services/command_service.py) | 高风险二次确认状态机、幂等执行 |
+| | [app/clients/platform_client.py](app/clients/platform_client.py) | 调用 mock-platform |
+| | [mocks/mock_platform/main.py](mocks/mock_platform/main.py) | 平台指令 mock |
+| | [app/models/business.py](app/models/business.py) | confirmations / tool_executions 等业务模型 |
+| **FR-4 知识问答** | [app/services/rag_service.py](app/services/rag_service.py) | 检索合并 + 证据门控 + 引用生成 |
+| | [app/services/knowledge_ingestion.py](app/services/knowledge_ingestion.py) | 导入、分块、实体富化、重建索引 |
+| | [app/api/knowledge.py](app/api/knowledge.py) | 上传 / 文档清单 / suggestions |
+| | [mocks/mock_knowledge/main.py](mocks/mock_knowledge/main.py) | 知识检索 mock |
+| **FR-5 日程提醒** | [app/api/business.py](app/api/business.py) | `/reminders` CRUD + `/reminders/parse` |
+| | [app/services/reminder_parser.py](app/services/reminder_parser.py) | 自然语言时间 / 时区 / 重复规则解析 |
+| | [app/services/reminder_service.py](app/services/reminder_service.py) | 持久化调度、occurrence 幂等 |
+| | [app/workers/reminder_worker.py](app/workers/reminder_worker.py) | 到期扫描 + IM 推送 |
+| **FR-6 财务查询** | [app/services/finance_service.py](app/services/finance_service.py) | 5 类查询、鉴权、降级话术 |
+| | [app/clients/finance_client.py](app/clients/finance_client.py) + [mocks/mock_finance/main.py](mocks/mock_finance/main.py) | 财务下游调用与 mock |
+| | [app/api/business.py](app/api/business.py) | 财务查询端点 |
+| **FR-7 人工转接** | [app/services/handoff_service.py](app/services/handoff_service.py) | 转接包生成、在线 / 离线分支 |
+| **FR-8 语言风格** | [app/services/assistant_service.py](app/services/assistant_service.py) | 统一回复策略（先确认 → 结论 → 下一步） |
+| | [evaluation/evaluate.py](evaluation/evaluate.py) | 禁用语 / 少 AI 味 / 拒答评分 |
+| **NFR-1 高并发** | [app/middleware/rate_limit.py](app/middleware/rate_limit.py) | tenant / user 双维限流（Lua 原子计数） |
+| | [app/core/circuit_breaker.py](app/core/circuit_breaker.py) | 下游熔断 + 半开探测 |
+| | [app/services/llm_gate.py](app/services/llm_gate.py) | LLM 全局排队池（600 在途 / 20 starts/s） |
+| | [loadtests/](loadtests/) | Locust 压测场景 |
+| **NFR-2 可靠性** | [app/services/outbox_relay.py](app/services/outbox_relay.py) | 至少一次投递 + 退避重试 |
+| | [app/services/dead_letter_service.py](app/services/dead_letter_service.py) + [app/models/dead_letter.py](app/models/dead_letter.py) | 死信持久化与重放 |
+| **NFR-3 安全** | [app/core/security.py](app/core/security.py) | JWT 签发校验 + 密码哈希 |
+| | [app/utils/masking.py](app/utils/masking.py) | 邮箱 / 手机 / 银行卡 / 身份证脱敏 |
+| | [app/core/logging.py](app/core/logging.py) | JSON 日志 + 敏感字段过滤 |
+| | [app/services/audit_service.py](app/services/audit_service.py) + [app/models/audit_log.py](app/models/audit_log.py) | 审计记录 |
+| **NFR-4 可观测** | [app/core/metrics.py](app/core/metrics.py) · [app/services/metrics_collector.py](app/services/metrics_collector.py) | Prometheus 指标 |
+| | [app/core/tracing.py](app/core/tracing.py) + [otel-collector-config.yaml](otel-collector-config.yaml) | OpenTelemetry trace |
+| | [observability/prometheus.yml](observability/prometheus.yml) + [alerts.yml](observability/alerts.yml) | 采集与告警规则 |
+| **NFR-5 成本与评测** | [app/services/llm_usage_service.py](app/services/llm_usage_service.py) + [app/models/llm_usage.py](app/models/llm_usage.py) | token 成本按租户统计 |
+| | [evaluation/dataset.json](evaluation/dataset.json) + [evaluate.py](evaluation/evaluate.py) | 50 条固定评测集 |
+
+### 测试与交付物位置
+
+| 交付物 | 位置 |
+|---|---|
+| 单元 / 集成 / E2E 测试 | [tests/unit/](tests/unit/)、[tests/integration/](tests/integration/)、[tests/e2e/test_core_scenarios.py](tests/e2e/test_core_scenarios.py)（E2E-01~10） |
+| 数据库迁移 | [migrations/versions/](migrations/versions/)（0001–0011） |
+| 压测脚本与报告 | [loadtests/](loadtests/) + [report/压测报告.md](report/压测报告.md) + [report/压测调试全过程.md](report/压测调试全过程.md) |
+| LLM 质量评测报告 | [docs/llm-evaluation.md](docs/llm-evaluation.md) + [evaluation/report.json](evaluation/report.json)（50 条固定集，`make evaluate` 生成；口径与指标见前者） |
+| 故障注入 | [scripts/fault_matrix.py](scripts/fault_matrix.py) + [report/故障注入报告.md](report/故障注入报告.md) + [report/fault-matrix.json](report/fault-matrix.json) |
+| 架构 / API 文档 | [docs/architecture.md](docs/architecture.md) + [docs/api.md](docs/api.md) |
+| 验收对照 / 演示剧本 | [docs/acceptance-checklist.md](docs/acceptance-checklist.md) + [docs/demo-script.md](docs/demo-script.md) |
+| coding agent 记录 | [docs/agent-log.md](docs/agent-log.md) |
+| 已知问题 | [docs/known-issues.md](docs/known-issues.md) |
+| 分阶段设计说明 | [docs/development/](docs/development/)（00-execution-guide ~ 07-verification） |
+| 演示租户知识库 | [sample-data/tenants/](sample-data/tenants/) |
+| 交付结论 | [report/正式验收报告.md](report/正式验收报告.md) |
+
+> **仓库外交付物**（随面试包一同提交，不在本 Git 仓库内，避免大文件入库）：
+> - 演示视频（10–15 分钟）：仓库同级目录 `../演示视频/9月24日演示视频.mp4`（`9月24日演示视频.mov` 为原始录制）；录制内容按 [docs/demo-script.md](docs/demo-script.md)。
+> - 架构图 PNG：仓库同级目录 `../框架图/`（3 张）；文字版架构与关键设计说明见 [docs/architecture.md](docs/architecture.md)。
 
 ## 已知限制
 

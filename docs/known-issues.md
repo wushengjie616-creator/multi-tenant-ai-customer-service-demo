@@ -6,6 +6,7 @@
 - WebSocket 已实现并验证 start/chunk/end、游标恢复与 OpenAI 兼容 provider `stream=true` 的 token delta 即时转发；固定话术和不支持 SSE 的降级路径仍会使用本地分片。
 - Qdrant 已按 Markdown 块存储多表示索引并执行租户/治理/有效期过滤；确定性 embedding 仍只负责低成本候选召回，语义弹性依赖 DeepSeek 查询改写和有上限的语义重排。该方案适合面试演示和小型租户库，不代表大规模专用 embedding 模型的容量或延迟表现。
 - 课程表、学习报告、请假、课程提醒和自动续费接口均已暴露；mock 的课程/报告数据仍是固定演示数据。
+- `app/services/tool_service.py` 提供了 `ToolRegistry` / `execute_candidate` 的通用「LLM 工具调用」allowlist + Schema 校验管线，但**未接入主流程**（`app/` 内零调用，仅 `tests/unit/test_tool_service.py` 孤立验证其自身行为）。真实的工具安全由两条确定性路径承担：意图按 `assistant_service.py` 的固定分支分发，写操作由 `api/business.py` 的指令 allowlist + Pydantic（`extra=forbid`）与 `command_service.py` 的二次确认 / 幂等 / 资源归属校验。该文件作为预留实现保留，待未来引入「LLM 直接提议工具名并执行」的路径时再接线。
 - 结构化日志、下游熔断和 OpenTelemetry API→HTTPX/NATS→worker trace 已接入；Prometheus 已接线 API/Worker、队列积压、LLM/Token、工具结果、熔断、死信、Outbox 和人工会话指标及基础告警。Redis/NATS 中断与 worker 积压恢复已由 `make faulttest` 自动验证，尚未进行长时间网络分区和数据库故障的生产级混沌测试。
 - 已在本地 2C4G 环境执行正式目标场景：500 WS 通过；Outbox 优化后 200 msg/s 稳定流达到 197.76 msg/s、ACK P95 200ms、零错误且端到端追平；1000 msg/s 经三 API 分流达到 411.22 msg/s、零错误，仍未达到目标。该结果不代表生产容量，扩容方案见 `docs/optimization/06-08-delivery-optimization-plan.md`。
 - API 出站已改为 NATS Core 每副本广播，并以 8000 入站、8001 WebSocket 收回复实测通过；Compose 没有内置统一负载均衡入口，生产部署仍需交给 ingress/LB。

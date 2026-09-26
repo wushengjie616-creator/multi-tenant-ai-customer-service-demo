@@ -1,0 +1,44 @@
+ Container education-ai-service-postgres-1 Running 
+ Container education-ai-service-redis-1 Running 
+ Container education-ai-service-otel-collector-1 Running 
+ Container education-ai-service-nats-1 Running 
+ Container education-ai-service-qdrant-1 Running 
+ Container education-ai-service-postgres-1 Waiting 
+ Container education-ai-service-qdrant-1 Waiting 
+ Container education-ai-service-qdrant-1 Healthy 
+ Container education-ai-service-postgres-1 Healthy 
+ Container education-ai-service-demo-bootstrap-1 Starting 
+ Container education-ai-service-demo-bootstrap-1 Started 
+ Container education-ai-service-redis-1 Waiting 
+ Container education-ai-service-nats-1 Waiting 
+ Container education-ai-service-qdrant-1 Waiting 
+ Container education-ai-service-demo-bootstrap-1 Waiting 
+ Container education-ai-service-postgres-1 Waiting 
+ Container education-ai-service-redis-1 Healthy 
+ Container education-ai-service-nats-1 Healthy 
+ Container education-ai-service-qdrant-1 Healthy 
+ Container education-ai-service-postgres-1 Healthy 
+ Container education-ai-service-demo-bootstrap-1 Exited 
+ Container education-ai-service-api-run-cc36bb71f44c Creating 
+ Container education-ai-service-api-run-cc36bb71f44c Created 
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-8.3.4, pluggy-1.6.0 -- /usr/local/bin/python3.12
+cachedir: .pytest_cache
+rootdir: /app
+configfile: pytest.ini
+plugins: anyio-4.15.1, cov-5.0.0, asyncio-0.24.0
+asyncio: mode=Mode.AUTO, default_loop_scope=function
+collecting ... collected 10 items
+
+tests/e2e/test_core_scenarios.py::test_e2e_01_and_10_knowledge_grounding PASSED [ 10%]
+tests/e2e/test_core_scenarios.py::test_e2e_02_invoice_is_masked PASSED   [ 20%]
+tests/e2e/test_core_scenarios.py::test_e2e_09_duplicate_message_has_one_reply PASSED [ 30%]
+tests/e2e/test_core_scenarios.py::test_e2e_05_short_reminder_reaches_mock_im PASSED [ 40%]
+tests/e2e/test_core_scenarios.py::test_e2e_06_handoff_contains_sanitized_context PASSED [ 50%]
+tests/e2e/test_core_scenarios.py::test_websocket_authenticated_message_and_reply PASSED [ 60%]
+tests/e2e/test_core_scenarios.py::test_e2e_03_cross_user_finance_is_denied_without_downstream_call PASSED [ 70%]
+tests/e2e/test_core_scenarios.py::test_e2e_04_auto_renew_requires_confirmation_and_is_idempotent PASSED [ 80%]
+tests/e2e/test_core_scenarios.py::test_e2e_07_finance_timeout_never_invents_data PASSED [ 90%]
+tests/e2e/test_core_scenarios.py::test_e2e_08_invalid_llm_json_is_safe_and_calls_no_tool PASSED [100%]
+
+============================== 10 passed in 8.74s ==============================
