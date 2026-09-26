@@ -1,0 +1,3 @@
+# 开源基础配置：允许直接提交空白 issue。
+# 完整的 bug/feature 表单模板、CONTRIBUTING 与 CI 可在需要时补充。
+blank_issues_enabled: true

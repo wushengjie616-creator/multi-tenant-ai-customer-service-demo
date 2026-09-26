@@ -1,8 +1,14 @@
 # 多租户 AI 客服平台 Demo
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED.svg?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+
 教育平台高并发 AI 客服机器人后端。通过 IM 接入消息、识别用户意图，完成 **平台指令、知识问答、日程提醒、财务查询** 四类业务，并支持人工转接、多租户隔离、高并发治理、安全审计与可观测。
 
 项目附带一套**零配置的本地演示环境**：5 个确定性外部依赖 mock（IM / LLM / 知识库 / 平台 / 财务），无需真实 LLM 或外部服务，`make up` 一键启动即可离线走通完整消息闭环。
+
+> ⚠️ **项目性质**：本项目是**面试演示项目**，非生产系统。外部依赖（IM / LLM / 知识库 / 平台 / 财务）均为本地 Mock，不调用任何真实付费服务；`sample-data/` 内全部租户与用户为**虚构数据**，不含真实客户资料。代码按 [MIT 许可证](LICENSE) 开源，仅供学习、演示与复现参考，不构成生产可用性承诺。
 
 ## 功能特性
 
