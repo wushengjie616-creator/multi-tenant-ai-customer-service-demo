@@ -19,6 +19,9 @@ htmlcov/
 .vscode/
 .DS_Store
 
+# 本地 coding agent 工具配置（不随交付源码提交）
+.claude/
+
 # 数据 / 日志
 pgdata/
 *.db

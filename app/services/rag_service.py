@@ -120,7 +120,10 @@ async def answer_question(
     *,
     query_entities: list[str] | None = None,
     semantic_reranker=None,
+    intent_context: str | None = None,
 ) -> dict:
+    # 二级意图作为检索辅助信号并入检索问句；不提供时行为与基线完全一致。
+    search_question = f"{question} {intent_context}".strip() if intent_context else question
     if query_entities is None:
         # Lazy import avoids a module cycle: ingestion uses deterministic_embedding.
         from app.services.knowledge_ingestion import fallback_enrichment
@@ -136,7 +139,7 @@ async def answer_question(
 
     try:
         vector_hits = await store.search(
-            tenant_id, deterministic_embedding(question), limit=8
+            tenant_id, deterministic_embedding(search_question), limit=8
         )
     except Exception:
         # The vector store is not a source of truth.  During an outage, fail
@@ -180,7 +183,7 @@ async def answer_question(
     hits = list(merged.values())
     # Qdrant 的哈希 embedding 分数先按检索阈值裁剪，再统一映射到证据门控分数。
     relevant: list[tuple[float, dict]] = []
-    normalized_question = "".join(question.replace("？", "").replace("?", "").split())
+    normalized_question = "".join(search_question.replace("？", "").replace("?", "").split())
     question_terms = {
         normalized_question[index : index + 2]
         for index in range(max(len(normalized_question) - 1, 0))
@@ -221,7 +224,7 @@ async def answer_question(
             except Exception:
                 semantic_candidates = []
             selected = await _semantic_select(
-                question, semantic_candidates, semantic_reranker
+                search_question, semantic_candidates, semantic_reranker
             )
             ranked = [
                 {**hit, "score": MIN_SCORE, "semantic_match": True}

@@ -11,24 +11,15 @@ from app.core.config import settings
 from app.demo_catalog import demo_tenant_ids
 from app.models import Tenant
 from app.clients.platform_client import platform_client  # noqa: F401 - 安全测试观察边界
-from app.services import command_service, handoff_service
+from app.services import handoff_service
+from app.services.course_consult_service import course_consult_skill
 from app.services.finance_service import format_finance_reply, query_with_audit
 from app.services.intent_service import classify_intent, classify_intent_with_llm
 from app.services.knowledge_ingestion import extract_query_entities
 from app.services.rag_service import answer_question
 
 KNOWLEDGE_INTENTS = {
-    "knowledge_qa",
-    "course_info",
-    "enrollment",
-    "schedule_info",
-    "teacher_info",
-    "pricing",
-    "promotion",
-    "attendance_policy",
-    "location_contact",
-    "account_support",
-    "material_info",
+    "knowledge",
     "unknown",
 }
 
@@ -206,7 +197,7 @@ async def generate_reply(session, payload: dict, *, context_store=None, on_token
             await handoff_service.create_handoff(
                 session, tenant_id=uuid.UUID(payload["tenant_id"]), user_id=uuid.UUID(payload["user_id"]),
                 conversation_id=conversation_id, summary=package["summary"], reason="repeated_dissatisfaction",
-                context={**package["context"], "dissatisfaction_count": count},
+                context={**package["context"], "dissatisfaction_count": count}, notify=False,
             )
             return "连续两次未能解决您的问题，已为您发起人工转接。"
     if "隔壁公司" in text or "其他租户" in text:
@@ -223,6 +214,16 @@ async def generate_reply(session, payload: dict, *, context_store=None, on_token
     decision = classify_intent(text)
     if decision.intent == "unknown" and not is_curated_demo:
         decision = await classify_intent_with_llm(text, tenant_llm)
+    # 课程咨询技能：首轮命中 course_consultation，或引导进行中（下一轮意图可能不再是
+    # course_consultation，如家长只回「三年级」），都继续走槽位状态机。
+    skill_active = await course_consult_skill.is_active(
+        payload["tenant_id"], payload["conversation_id"]
+    )
+    if skill_active and decision.intent in ("human_handoff", "finance", "platform_command", "schedule"):
+        # 引导中家长表达强业务诉求（转人工/退款/指令/提醒）→ 退出引导走正常流程。
+        await course_consult_skill.clear(payload["tenant_id"], payload["conversation_id"])
+    elif decision.intent == "course_consultation" or skill_active:
+        return await course_consult_skill.handle(session, payload, text, tenant_llm=tenant_llm)
     if decision.intent in KNOWLEDGE_INTENTS:
         rag_query, _ = await rewrite_rag_query(
             session, payload, text, context_store=context_store, tenant_llm=tenant_llm
@@ -242,11 +243,15 @@ async def generate_reply(session, payload: dict, *, context_store=None, on_token
                 payload["tenant_id"],
                 rag_query,
                 semantic_reranker=tenant_llm,
+                intent_context=decision.secondary_intent,
             )
         citations = "、".join(item["title"] for item in result["citations"])
         answer = result["answer"]
         if result["evidence_level"] == "SUPPORTED":
             try:
+                user_content = f"用户问题：{rag_query}\n\n可信证据：\n{result['answer']}"
+                if decision.secondary_intent:
+                    user_content = f"用户意图：{decision.secondary_intent}\n\n" + user_content
                 answer = await _visible_llm_generate(
                     tenant_llm,
                     [
@@ -260,7 +265,7 @@ async def generate_reply(session, payload: dict, *, context_store=None, on_token
                         },
                         {
                             "role": "user",
-                            "content": f"用户问题：{rag_query}\n\n可信证据：\n{result['answer']}",
+                            "content": user_content,
                         },
                     ],
                     on_token,
@@ -284,7 +289,7 @@ async def generate_reply(session, payload: dict, *, context_store=None, on_token
             session, payload, text, reason="explicit_request",
             context_store=context_store, tenant_llm=tenant_llm,
         )
-        await handoff_service.create_handoff(session, tenant_id=uuid.UUID(payload["tenant_id"]), user_id=uuid.UUID(payload["user_id"]), conversation_id=uuid.UUID(payload["conversation_id"]), summary=package["summary"], reason="explicit_request", context=package["context"])
+        await handoff_service.create_handoff(session, tenant_id=uuid.UUID(payload["tenant_id"]), user_id=uuid.UUID(payload["user_id"]), conversation_id=uuid.UUID(payload["conversation_id"]), summary=package["summary"], reason="explicit_request", context=package["context"], notify=False)
         return "已为你发起人工转接，请留意坐席接入通知。"
     if decision.intent == "platform_command" and decision.risk_level == "high":
         if payload["tenant_id"] == settings.demo_customer_tenant_id:
@@ -295,10 +300,11 @@ async def generate_reply(session, payload: dict, *, context_store=None, on_token
                 if subscription.get("data", {}).get("auto_renew") is False:
                     return "你未开启自动续费，不用取消。"
             except Exception:
-                # 状态查询失败时仍保留原有二次确认流程，不把读取故障误报成“未开启”。
+                # 状态查询失败时不把读取故障误报成“未开启”，继续走下方按钮引导。
                 pass
-        confirmation = await command_service.propose(session, tenant_id=uuid.UUID(payload["tenant_id"]), user_id=uuid.UUID(payload["user_id"]), conversation_id=uuid.UUID(payload["conversation_id"]), action="close_auto_renew", resource_id=payload["user_id"], arguments={})
-        return f"关闭自动续费会影响后续扣款。请明确确认，确认编号：{confirmation.id}（5 分钟内有效）。"
+        # 二次确认只能由 POST /commands/confirm/{id} 兑现，聊天路径没有消费“确认”的入口；
+        # 因此不在此 propose，只引导用户走按钮操作，避免“承诺了却兑现不了”。
+        return "关闭自动续费需要二次确认，请在下方功能入口点击「关闭自动续费」后完成确认。"
     if decision.intent == "platform_command":
         action = decision.parameters.get("action")
         if action == "submit_leave" or "请假" in text or "缺席" in text:
@@ -311,7 +317,7 @@ async def generate_reply(session, payload: dict, *, context_store=None, on_token
             return "可以申请调课。点击下方按钮跳转至办事服务窗口查看可用安排。"
         return "已识别为业务办理请求，请通过下方对应的功能入口继续操作。"
     if decision.intent == "schedule":
-        return "请提供明确的日期、时间和时区，我会在确认后创建提醒。"
+        return "请在下方提醒功能入口填写提醒事项、日期和时间，确认后即可加入提醒列表。"
     if decision.intent == "chitchat":
         try:
             history = await _conversation_history(session, payload, context_store)

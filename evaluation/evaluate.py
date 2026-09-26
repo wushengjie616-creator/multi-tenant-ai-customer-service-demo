@@ -43,7 +43,7 @@ async def run() -> dict:
     rows = []
     for sample in dataset:
         result = classify_intent(sample["input"])
-        expected = {"knowledge": "knowledge_qa", "reminder": "schedule"}.get(sample["expected_intent"], sample["expected_intent"])
+        expected = {"reminder": "schedule"}.get(sample["expected_intent"], sample["expected_intent"])
         predicted_tool = result.intent in TOOL_INTENTS
         predicted_handoff = result.intent == "human_handoff"
         rows.append({"id": sample["id"], "expected": expected, "actual": result.intent,

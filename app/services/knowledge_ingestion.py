@@ -82,7 +82,11 @@ def fallback_enrichment(title: str, content: str) -> dict[str, Any]:
     for group in ALIAS_GROUPS:
         if any(term in combined for term in group):
             aliases.extend(group)
-    if any(term in combined for term in ("几点", "什么时候", "周几")):
+    # 「什么时候/几点」是口语问法；「每周X HH:MM」这类课表句式同样是上课时间信号，
+    # 让含课表的文档（如课程目录）能被「什么时候上课」检索命中，而非只命中订单等旁证。
+    if any(term in combined for term in ("几点", "什么时候", "周几")) or re.search(
+        r"(?:每周|星期)[一二三四五六日天]", combined
+    ):
         aliases.extend(["上课时间", "开课时间"])
     if any(term in combined for term in ("在哪", "哪儿", "怎么走")):
         aliases.extend(["校区", "地址", "地点", "位置"])
@@ -93,9 +97,12 @@ def fallback_enrichment(title: str, content: str) -> dict[str, Any]:
     if sum(1 for heading in headings if "班" in heading) >= 2:
         aliases.extend(["课程目录", "班型"])
 
-    entities = _unique(([title] if title else []) + headings + quoted + matched_terms + time_amounts + product_codes)
+    # product_codes 是最高信号实体（如 A3/S2/P1），必须排在前列，避免被 `_unique`
+    # 的 limit=20 截断挤出——大文档（如六班课程目录）headings/time_amounts 很长时，
+    # 末尾的课程编码会被挤掉，导致「A3」这类查询检索不到课程目录、误中订单等旁证。
+    entities = _unique(([title] if title else []) + headings + quoted + product_codes + matched_terms + time_amounts)
     topics = _unique(headings + ([title] if title else []) + matched_terms, limit=12)
-    keywords = _unique(matched_terms + time_amounts + product_codes + aliases, limit=20)
+    keywords = _unique(product_codes + matched_terms + time_amounts + aliases, limit=20)
     aliases = _unique(aliases, limit=20)
     suggested_questions = [
         f"请介绍一下{heading}？"

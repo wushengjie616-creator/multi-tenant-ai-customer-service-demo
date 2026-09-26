@@ -54,7 +54,7 @@ def serialize(row: Handoff) -> dict:
     }
 
 
-async def create_handoff(session: AsyncSession, *, tenant_id, user_id, conversation_id, summary: str, reason: str, context: dict) -> Handoff:
+async def create_handoff(session: AsyncSession, *, tenant_id, user_id, conversation_id, summary: str, reason: str, context: dict, notify: bool = True) -> Handoff:
     existing = await session.scalar(select(Handoff).where(Handoff.tenant_id == tenant_id, Handoff.conversation_id == conversation_id, Handoff.active_key == "active"))
     if existing is not None:
         return existing
@@ -63,8 +63,11 @@ async def create_handoff(session: AsyncSession, *, tenant_id, user_id, conversat
     conversation = await session.get(Conversation, conversation_id)
     if conversation is not None:
         conversation.dissatisfaction_count = 0
-    envelope = EventEnvelope(trace_id=get_trace_id() or f"handoff-{handoff.id}", tenant_id=str(tenant_id), type=EventType.IM_OUTBOUND, payload={"message_id": f"handoff-{handoff.id}", "tenant_id": str(tenant_id), "user_id": str(user_id), "conversation_id": str(conversation_id), "content": "已为你发起人工转接。", "handoff_id": str(handoff.id), "handoff_status": handoff.status, "summary": handoff.summary, "context": handoff.context})
-    session.add(OutboxEvent(event_id=envelope.event_id, trace_id=envelope.trace_id, tenant_id=tenant_id, subject=EventType.IM_OUTBOUND, payload=envelope.model_dump(mode="json")))
+    # 聊天路径（generate_reply 的转人工分支）会用自己的 return 文案经 save_reply 回给用户；
+    # 此时传 notify=False，避免再推送一条结构化的转接通知造成重复。
+    if notify:
+        envelope = EventEnvelope(trace_id=get_trace_id() or f"handoff-{handoff.id}", tenant_id=str(tenant_id), type=EventType.IM_OUTBOUND, payload={"message_id": f"handoff-{handoff.id}", "tenant_id": str(tenant_id), "user_id": str(user_id), "conversation_id": str(conversation_id), "content": "已为你发起人工转接。", "handoff_id": str(handoff.id), "handoff_status": handoff.status, "summary": handoff.summary, "context": handoff.context})
+        session.add(OutboxEvent(event_id=envelope.event_id, trace_id=envelope.trace_id, tenant_id=tenant_id, subject=EventType.IM_OUTBOUND, payload=envelope.model_dump(mode="json")))
     await session.commit(); await session.refresh(handoff)
     return handoff
 

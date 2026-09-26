@@ -14,6 +14,7 @@ from app.core.security import ROLE_ADMIN, ROLE_USER, hash_password
 from app.models import Conversation, Tenant, User
 from app.demo_catalog import demo_tenant_catalog
 from app.services.knowledge_ingestion import build_document_chunks
+from app.services.graph_store import graph_store
 
 ALL_DEMO_FEATURES = [
     "knowledge", "assistant", "learning", "finance",
@@ -168,20 +169,32 @@ async def bootstrap_knowledge(root: Path, manifest: dict) -> tuple[int, int]:
     tenant_id = manifest["tenant_id"]
     document_count = 0
     chunk_count = 0
-    for document in manifest["documents"]:
-        content = (root / document["file"]).read_text(encoding="utf-8")
-        chunks = build_document_chunks(
-            tenant_id=tenant_id,
-            document_id=document["document_id"],
-            title=document["title"],
-            source=document["source"],
-            content=content,
-            version=int(document.get("version", 1)),
-        )
-        await vector_store.delete_document(tenant_id, document["document_id"])
-        await vector_store.upsert_chunks(tenant_id, chunks)
-        document_count += 1
-        chunk_count += len(chunks)
+    async with async_session() as session:
+        for document in manifest["documents"]:
+            content = (root / document["file"]).read_text(encoding="utf-8")
+            chunks = build_document_chunks(
+                tenant_id=tenant_id,
+                document_id=document["document_id"],
+                title=document["title"],
+                source=document["source"],
+                content=content,
+                version=int(document.get("version", 1)),
+            )
+            await vector_store.delete_document(tenant_id, document["document_id"])
+            await vector_store.upsert_chunks(tenant_id, chunks)
+            await graph_store.replace_document(
+                session,
+                tenant_id,
+                document_id=document["document_id"],
+                title=document["title"],
+                source=document["source"],
+                content=content,
+                version=int(document.get("version", 1)),
+                effective_from=document.get("effective_from"),
+                effective_until=document.get("effective_until"),
+            )
+            document_count += 1
+            chunk_count += len(chunks)
     return document_count, chunk_count
 
 

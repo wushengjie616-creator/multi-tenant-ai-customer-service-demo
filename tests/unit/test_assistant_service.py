@@ -246,7 +246,7 @@ async def test_grounded_knowledge_answer_is_synthesized_but_citations_stay_serve
     monkeypatch.setattr(
         assistant_service,
         "classify_intent",
-        lambda _: IntentResult(intent="knowledge_qa", confidence=1, source="rule"),
+        lambda _: IntentResult(intent="knowledge", confidence=1, source="rule"),
     )
     monkeypatch.setattr(
         assistant_service,
@@ -373,7 +373,7 @@ async def test_rag_followup_is_rewritten_from_same_conversation_context(monkeypa
     monkeypatch.setattr(assistant_service, "answer_question", rag)
     monkeypatch.setattr(
         assistant_service, "classify_intent",
-        lambda _: IntentResult(intent="pricing", confidence=1, source="rule"),
+        lambda _: IntentResult(intent="knowledge", confidence=1, source="rule"),
     )
 
     reply = await assistant_service.generate_reply(None, {

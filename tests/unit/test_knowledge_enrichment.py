@@ -123,3 +123,30 @@ def test_fallback_enrichment_keeps_course_codes_and_catalog_intent():
     assert {"A3", "S2", "课程目录"}.issubset(set(document["entities"] + document["aliases"]))
     assert "课程目录" in query["aliases"]
     assert "A3" in schedule["entities"]
+
+
+def test_fallback_enrichment_keeps_bare_codes_when_catalog_is_large():
+    # 六班课程目录的 headings/time_amounts 会超过 `_unique` 的 limit=20；课程编码是
+    # 最高信号实体，必须排在前面，不能被截断挤出（否则「A3」查询检索不到课程目录）。
+    catalog = (
+        "# 2026 年秋季课程\n\n"
+        + "".join(
+            f"## 班型{i} {code}\n\n科目：数学；每周四 18:30–20:00，静安校区。12 次学费 2000 元。\n\n"
+            for i, code in enumerate(["M1", "B2", "A3", "S2", "P1", "C1"])
+        )
+    )
+    metadata = knowledge_ingestion.fallback_enrichment("2026 秋季课程与班级", catalog)
+    assert {"M1", "B2", "A3", "S2", "P1", "C1"}.issubset(set(metadata["entities"]))
+    assert "A3" in metadata["keywords"]
+
+
+def test_fallback_enrichment_marks_schedule_content_with_class_time_alias():
+    # 含「每周X HH:MM」课表句式的文档应能命中「什么时候上课」这类口语问法。
+    schedule_doc = knowledge_ingestion.fallback_enrichment(
+        "2026 秋季课程与班级", "## 数学思维进阶班 A3\n每周四 18:30–20:00"
+    )
+    non_schedule = knowledge_ingestion.fallback_enrichment(
+        "学费与自动续费", "数学思维进阶班 A3，实付 3280 元"
+    )
+    assert "上课时间" in schedule_doc["aliases"]
+    assert "上课时间" not in non_schedule["aliases"]
